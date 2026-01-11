@@ -1,0 +1,13 @@
+{
+  "name": "Test Checkpoint Loading",
+  "description": "Simple test to verify ComfyUI and checkpoint loading work",
+  "version": "1.0.0",
+  "workflow": {
+    "1": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {
+        "ckpt_name": "ltx-video-2b-v0.9.5.safetensors"
+      }
+    }
+  }
+}

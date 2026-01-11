@@ -583,13 +583,19 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
 
         if action == "generate":
             workflow_input = job_input.get("workflow")
+            if not workflow_input:
+                return {"status": "error", "error": "workflow is required - pass a ComfyUI API workflow JSON"}
+
             if isinstance(workflow_input, dict):
                 workflow = workflow_input
             else:
-                workflow_name = workflow_input or "text-to-video-audio"
-                workflow = load_workflow_template(str(workflow_name))
+                # Try loading from template file
+                workflow = load_workflow_template(str(workflow_input))
 
-            workflow = update_workflow_inputs(workflow, job_input)
+            # Optionally update workflow inputs if provided
+            if any(k in job_input for k in ["prompt", "width", "height", "num_frames", "fps", "steps", "cfg_scale", "seed"]):
+                workflow = update_workflow_inputs(workflow, job_input)
+
             outputs = run_comfyui_workflow(workflow)
 
             uploaded = []
