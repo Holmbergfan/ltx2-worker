@@ -434,34 +434,35 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         class_type = node.get("class_type")
         inputs = node.get("inputs", {})
 
-        if class_type == "LTXVTextEncode":
-            if prompt is not None:
-                inputs["prompt"] = prompt
-            if negative_prompt is not None:
-                inputs["negative_prompt"] = negative_prompt
+        if class_type == "CLIPTextEncode" and prompt is not None:
+            inputs["text"] = prompt
 
-        if class_type == "LTXVAudioGenerate" and prompt is not None:
-            inputs["prompt"] = prompt
+        if class_type == "LTXVConditioning" and fps is not None:
+            inputs["frame_rate"] = float(fps)
 
-        if class_type == "EmptyLTXVLatentVideo":
+        if class_type == "EmptyImage":
             if width is not None:
                 inputs["width"] = int(width)
             if height is not None:
                 inputs["height"] = int(height)
+
+        if class_type == "EmptyLTXVLatentVideo" and num_frames is not None:
+            inputs["length"] = int(num_frames)
+
+        if class_type == "LTXVEmptyLatentAudio":
             if num_frames is not None:
-                inputs["length"] = int(num_frames)
-
-        if class_type == "LTXVSampler":
-            if steps is not None:
-                inputs["steps"] = int(steps)
-            if cfg is not None:
-                inputs["cfg"] = float(cfg)
-            if seed is not None:
-                inputs["seed"] = int(seed)
-
-        if class_type == "VHS_VideoCombine":
+                inputs["frames_number"] = int(num_frames)
             if fps is not None:
-                inputs["fps"] = int(fps)
+                inputs["frame_rate"] = int(fps)
+
+        if class_type == "RandomNoise" and seed is not None:
+            inputs["noise_seed"] = int(seed)
+
+        if class_type == "CFGGuider" and cfg is not None:
+            inputs["cfg"] = float(cfg)
+
+        if class_type == "CreateVideo" and fps is not None:
+            inputs["fps"] = float(fps)
 
         if class_type == "LoadImage":
             input_image = job_input.get("input_image")
