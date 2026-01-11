@@ -114,6 +114,44 @@ def install_comfyui_deps():
             "pip", "install", "--no-cache-dir", "-q", "-r", req_file
         ], check=False, timeout=300)
 
+def ensure_custom_nodes():
+    """Ensure LTX-Video custom nodes are installed"""
+    custom_nodes = f"{COMFY_HOME}/custom_nodes"
+    os.makedirs(custom_nodes, exist_ok=True)
+
+    ltxv_path = f"{custom_nodes}/ComfyUI-LTXVideo"
+    vhs_path = f"{custom_nodes}/ComfyUI-VideoHelperSuite"
+
+    # Install LTX-Video nodes if missing
+    if not os.path.exists(f"{ltxv_path}/nodes.py"):
+        print("Installing ComfyUI-LTXVideo custom nodes...")
+        import shutil
+        shutil.rmtree(ltxv_path, ignore_errors=True)
+        subprocess.run([
+            "git", "clone", "--depth", "1",
+            "https://github.com/Lightricks/ComfyUI-LTXVideo.git",
+            ltxv_path
+        ], check=True, timeout=120)
+        req = f"{ltxv_path}/requirements.txt"
+        if os.path.exists(req):
+            subprocess.run(["pip", "install", "--no-cache-dir", "-q", "-r", req], check=False, timeout=300)
+        print("ComfyUI-LTXVideo installed!")
+
+    # Install VideoHelperSuite if missing
+    if not os.path.exists(f"{vhs_path}/__init__.py"):
+        print("Installing ComfyUI-VideoHelperSuite...")
+        import shutil
+        shutil.rmtree(vhs_path, ignore_errors=True)
+        subprocess.run([
+            "git", "clone", "--depth", "1",
+            "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
+            vhs_path
+        ], check=True, timeout=120)
+        req = f"{vhs_path}/requirements.txt"
+        if os.path.exists(req):
+            subprocess.run(["pip", "install", "--no-cache-dir", "-q", "-r", req], check=False, timeout=300)
+        print("ComfyUI-VideoHelperSuite installed!")
+
 def install_comfyui(force_reinstall: bool = False):
     """Install ComfyUI to network volume if not present"""
     if force_reinstall and os.path.exists(COMFY_HOME):
@@ -240,6 +278,7 @@ def setup_environment():
 
     ensure_directories()
     install_comfyui()
+    ensure_custom_nodes()  # Ensure LTX-Video nodes are installed
     ensure_comfy_model_links()
     download_models()
 
