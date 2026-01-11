@@ -4,7 +4,7 @@ set -e
 # LTX-2 Worker Build & Push Script
 # Usage: ./build-and-push.sh [dockerhub_username]
 
-DOCKERHUB_USER="${1:-holmbergpro}"
+DOCKERHUB_USER="${1:-holmbergfan}"
 IMAGE_NAME="ltx2-worker"
 VERSION="1.0.0"
 

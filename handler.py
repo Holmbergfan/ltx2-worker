@@ -16,11 +16,13 @@ import time
 import uuid
 import subprocess
 import traceback
+import json
 from pathlib import Path
 from typing import Dict, Any, List
 
 import runpod
 import boto3
+import requests
 from huggingface_hub import hf_hub_download
 
 # Enable fast HF downloads (must be set before any HF calls)
@@ -33,9 +35,18 @@ os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 MODEL_DIR = os.environ.get("MODEL_DIR", "/runpod-volume/models")
 COMFY_HOME = os.environ.get("COMFY_HOME", "/runpod-volume/ComfyUI")
 TMPDIR = os.environ.get("TMPDIR", "/runpod-volume/tmp")
+COMFY_HOST = os.environ.get("COMFY_HOST", "127.0.0.1")
+COMFY_PORT = int(os.environ.get("COMFY_PORT", "8188"))
+COMFY_URL = f"http://{COMFY_HOST}:{COMFY_PORT}"
 
 # HuggingFace
 HF_TOKEN = os.environ.get("HF_TOKEN", os.environ.get("HUGGINGFACE_HUB_TOKEN", ""))
+LTX_MODEL_REPO = os.environ.get("LTX_MODEL_REPO", "Lightricks/LTX-Video")
+LTX_MODEL_FILENAME = os.environ.get("LTX_MODEL_FILENAME", "ltx-video-2b-v0.9.5.safetensors")
+LTX_MODEL_URL = os.environ.get(
+    "LTX_MODEL_URL",
+    f"https://huggingface.co/{LTX_MODEL_REPO}/resolve/main/{LTX_MODEL_FILENAME}",
+)
 
 # S3 Storage
 S3_BUCKET = os.environ.get("S3_BUCKET", "ltx2-models")
@@ -44,6 +55,8 @@ S3_REGION = os.environ.get("S3_REGION", "eu-north-1")
 AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
 PRESIGNED_URL_EXPIRY = int(os.environ.get("PRESIGNED_URL_EXPIRY", 14400))
+
+COMFY_PROCESS = None
 
 # =============================================================================
 # Setup Functions - Download at Runtime to Network Volume
@@ -56,12 +69,41 @@ def ensure_directories():
         f"{MODEL_DIR}/text_encoders",
         f"{MODEL_DIR}/vae",
         f"{MODEL_DIR}/clip",
+        f"{MODEL_DIR}/loras",
+        f"{MODEL_DIR}/latent_upscale_models",
         f"{MODEL_DIR}/.cache/hf",
         TMPDIR,
     ]
     for d in dirs:
         os.makedirs(d, exist_ok=True)
     print(f"Directories ready in {MODEL_DIR}")
+
+def ensure_comfy_model_links():
+    """Expose MODEL_DIR to ComfyUI models directory"""
+    comfy_models = f"{COMFY_HOME}/models"
+    if os.path.islink(comfy_models):
+        return
+
+    if not os.path.exists(comfy_models):
+        os.makedirs(os.path.dirname(comfy_models), exist_ok=True)
+        try:
+            os.symlink(MODEL_DIR, comfy_models)
+            print(f"Linked ComfyUI models -> {MODEL_DIR}")
+            return
+        except OSError as e:
+            print(f"Symlink to models failed ({e}), falling back to subdir links...")
+
+    # If models dir exists, link subfolders to keep ComfyUI happy
+    os.makedirs(comfy_models, exist_ok=True)
+    for subdir in ["checkpoints", "text_encoders", "vae", "clip"]:
+        src = os.path.join(MODEL_DIR, subdir)
+        dst = os.path.join(comfy_models, subdir)
+        if os.path.exists(dst) or os.path.islink(dst):
+            continue
+        try:
+            os.symlink(src, dst)
+        except OSError as e:
+            print(f"Symlink for {subdir} failed: {e}")
 
 def install_comfyui():
     """Install ComfyUI to network volume if not present"""
@@ -98,6 +140,17 @@ def install_comfyui():
             f"{custom_nodes}/ComfyUI-VideoHelperSuite"
         ], check=True, timeout=120)
 
+        for req in [
+            f"{custom_nodes}/ComfyUI-LTXVideo/requirements.txt",
+            f"{custom_nodes}/ComfyUI-VideoHelperSuite/requirements.txt",
+        ]:
+            if os.path.exists(req):
+                subprocess.run(
+                    ["pip", "install", "--no-cache-dir", "-r", req],
+                    check=True,
+                    timeout=600,
+                )
+
         print("ComfyUI installed!")
         return True
     except Exception as e:
@@ -125,18 +178,17 @@ def download_models(force: bool = False):
     """Download LTX-Video models to network volume"""
 
     # LTX-Video model (2B v0.9.5 - 6.34GB)
-    model_path = f"{MODEL_DIR}/checkpoints/ltx-video-2b-v0.9.5.safetensors"
+    model_path = f"{MODEL_DIR}/checkpoints/{LTX_MODEL_FILENAME}"
     if not os.path.exists(model_path) or force:
-        print("Downloading LTX-Video model (~6GB)...")
+        print(f"Downloading LTX-Video model ({LTX_MODEL_FILENAME})...")
         try:
             # Try fast download with aria2c
-            url = "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.5.safetensors"
-            fast_download(url, model_path, HF_TOKEN)
+            fast_download(LTX_MODEL_URL, model_path, HF_TOKEN)
         except Exception as e:
             print(f"aria2c failed ({e}), falling back to hf_hub_download...")
             hf_hub_download(
-                repo_id="Lightricks/LTX-Video",
-                filename="ltx-video-2b-v0.9.5.safetensors",
+                repo_id=LTX_MODEL_REPO,
+                filename=LTX_MODEL_FILENAME,
                 local_dir=f"{MODEL_DIR}/checkpoints",
                 token=HF_TOKEN or None,
             )
@@ -172,9 +224,185 @@ def setup_environment():
 
     ensure_directories()
     install_comfyui()
+    ensure_comfy_model_links()
     download_models()
 
     print("Setup complete!")
+
+# =============================================================================
+# ComfyUI Helpers
+# =============================================================================
+
+def ensure_comfyui_running():
+    """Start ComfyUI once per worker and wait for the API to respond."""
+    global COMFY_PROCESS
+
+    if COMFY_PROCESS and COMFY_PROCESS.poll() is None:
+        return
+
+    cmd = [
+        sys.executable,
+        f"{COMFY_HOME}/main.py",
+        "--listen",
+        COMFY_HOST,
+        "--port",
+        str(COMFY_PORT),
+    ]
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    COMFY_PROCESS = subprocess.Popen(cmd, env=env)
+
+    for _ in range(60):
+        try:
+            resp = requests.get(f"{COMFY_URL}/history", timeout=2)
+            if resp.status_code == 200:
+                return
+        except Exception:
+            time.sleep(1)
+    raise RuntimeError("ComfyUI failed to start or respond on /history")
+
+def load_workflow_template(name: str) -> Dict[str, Any]:
+    """Load a prompt-format workflow from /app/workflows."""
+    path = Path("/app/workflows") / f"{name}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Workflow not found: {path}")
+    with path.open() as f:
+        data = json.load(f)
+    return data.get("workflow", data)
+
+def download_input_image(value: str) -> str:
+    """Download or decode an input image into COMFY_HOME/input and return the filename."""
+    input_dir = Path(COMFY_HOME) / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"input_{uuid.uuid4().hex}.png"
+    dest = input_dir / filename
+
+    if value.startswith("http://") or value.startswith("https://"):
+        resp = requests.get(value, timeout=60)
+        resp.raise_for_status()
+        dest.write_bytes(resp.content)
+        return filename
+
+    if value.startswith("data:image"):
+        header, b64data = value.split(",", 1)
+        import base64
+        dest.write_bytes(base64.b64decode(b64data))
+        return filename
+
+    # Assume it's already a filename in input dir
+    return value
+
+def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply prompt parameters to the prompt-format workflow."""
+    prompt = job_input.get("prompt")
+    negative_prompt = job_input.get("negative_prompt")
+    width = job_input.get("width")
+    height = job_input.get("height")
+    fps = job_input.get("fps")
+    duration_seconds = job_input.get("duration_seconds")
+    num_frames = job_input.get("num_frames")
+    steps = job_input.get("steps")
+    cfg = job_input.get("cfg_scale")
+    seed = job_input.get("seed")
+
+    if fps is None:
+        fps = 24
+    if num_frames is None and duration_seconds:
+        num_frames = int(float(duration_seconds) * float(fps)) + 1
+
+    for node in workflow.values():
+        class_type = node.get("class_type")
+        inputs = node.get("inputs", {})
+
+        if class_type == "LTXVTextEncode":
+            if prompt is not None:
+                inputs["prompt"] = prompt
+            if negative_prompt is not None:
+                inputs["negative_prompt"] = negative_prompt
+
+        if class_type == "LTXVAudioGenerate" and prompt is not None:
+            inputs["prompt"] = prompt
+
+        if class_type == "EmptyLTXVLatentVideo":
+            if width is not None:
+                inputs["width"] = int(width)
+            if height is not None:
+                inputs["height"] = int(height)
+            if num_frames is not None:
+                inputs["length"] = int(num_frames)
+
+        if class_type == "LTXVSampler":
+            if steps is not None:
+                inputs["steps"] = int(steps)
+            if cfg is not None:
+                inputs["cfg"] = float(cfg)
+            if seed is not None:
+                inputs["seed"] = int(seed)
+
+        if class_type == "VHS_VideoCombine":
+            if fps is not None:
+                inputs["fps"] = int(fps)
+
+        if class_type == "LoadImage":
+            input_image = job_input.get("input_image")
+            if input_image:
+                inputs["image"] = download_input_image(input_image)
+
+    return workflow
+
+def queue_prompt(prompt: Dict[str, Any]) -> str:
+    payload = {"prompt": prompt, "client_id": "runpod-ltx2"}
+    resp = requests.post(f"{COMFY_URL}/prompt", json=payload, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["prompt_id"]
+
+def wait_for_prompt(prompt_id: str, timeout_seconds: int = 1800) -> Dict[str, Any]:
+    start = time.time()
+    while time.time() - start < timeout_seconds:
+        resp = requests.get(f"{COMFY_URL}/history/{prompt_id}", timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if prompt_id in data:
+                entry = data[prompt_id]
+                outputs = entry.get("outputs")
+                if outputs:
+                    return entry
+        time.sleep(2)
+    raise TimeoutError("ComfyUI prompt timed out")
+
+def extract_output_files(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+    outputs = entry.get("outputs", {})
+    found = []
+    for out in outputs.values():
+        if isinstance(out, dict):
+            for key in ("images", "gifs", "videos", "audio", "files"):
+                for item in out.get(key, []) or []:
+                    if isinstance(item, dict) and "filename" in item:
+                        found.append(item)
+    return found
+
+def resolve_output_path(item: Dict[str, Any]) -> Path:
+    filename = item["filename"]
+    subfolder = item.get("subfolder", "")
+    out_type = item.get("type", "output")
+    base = Path(COMFY_HOME)
+    if out_type == "input":
+        base = base / "input"
+    elif out_type == "temp":
+        base = base / "temp"
+    else:
+        base = base / "output"
+    return base / subfolder / filename
+
+def run_comfyui_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
+    ensure_comfyui_running()
+    prompt_id = queue_prompt(workflow)
+    entry = wait_for_prompt(prompt_id)
+    files = extract_output_files(entry)
+    if not files:
+        raise RuntimeError("No output files produced by ComfyUI")
+    return files
 
 # =============================================================================
 # S3 Upload
@@ -252,23 +480,45 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 "status": "success",
                 "comfyui_installed": os.path.exists(f"{COMFY_HOME}/main.py"),
-                "model_exists": os.path.exists(f"{MODEL_DIR}/checkpoints/ltx-video-2b-v0.9.5.safetensors"),
+                "model_exists": os.path.exists(f"{MODEL_DIR}/checkpoints/{LTX_MODEL_FILENAME}"),
+                "gpu": gpu,
+            }
+
+        if action == "list_models":
+            checkpoints = sorted(Path(f"{MODEL_DIR}/checkpoints").glob("*.safetensors"))
+            loras = sorted(Path(f"{MODEL_DIR}/loras").glob("*.safetensors"))
+            upscalers = sorted(Path(f"{MODEL_DIR}/latent_upscale_models").glob("*.safetensors"))
+            return {
+                "status": "success",
+                "checkpoints": [p.name for p in checkpoints],
+                "loras": [p.name for p in loras],
+                "latent_upscalers": [p.name for p in upscalers],
                 "gpu": gpu,
             }
 
         if action == "generate":
-            prompt = job_input.get("prompt", "A beautiful sunset over the ocean")
-            width = job_input.get("width", 768)
-            height = job_input.get("height", 512)
-            steps = job_input.get("steps", 30)
-            seed = job_input.get("seed", int(time.time()) % 1000000)
+            workflow_input = job_input.get("workflow")
+            if isinstance(workflow_input, dict):
+                workflow = workflow_input
+            else:
+                workflow_name = workflow_input or "text-to-video-audio"
+                workflow = load_workflow_template(str(workflow_name))
 
-            # TODO: Implement actual ComfyUI workflow execution
-            # For now, return status
+            workflow = update_workflow_inputs(workflow, job_input)
+            outputs = run_comfyui_workflow(workflow)
+
+            uploaded = []
+            for item in outputs:
+                path = resolve_output_path(item)
+                if path.exists():
+                    content_type = "video/mp4"
+                    if path.suffix.lower() == ".gif":
+                        content_type = "image/gif"
+                    uploaded.append(upload_to_s3(str(path), content_type=content_type))
+
             return {
                 "status": "success",
-                "message": "Environment ready. ComfyUI workflow execution coming soon.",
-                "parameters": {"prompt": prompt, "width": width, "height": height, "steps": steps, "seed": seed},
+                "outputs": uploaded,
                 "gpu": gpu,
                 "execution_time": round(time.time() - start_time, 2),
             }

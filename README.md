@@ -93,11 +93,13 @@ curl -X POST "https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/run" \
   -d '{
     "input": {
       "action": "generate",
+      "workflow": "text-to-video-audio",
       "prompt": "A golden retriever running through a field of sunflowers, slow motion, cinematic",
       "negative_prompt": "blurry, low quality",
       "width": 768,
       "height": 512,
       "duration_seconds": 4,
+      "fps": 24,
       "with_audio": true,
       "model": "distilled-fp8"
     }
@@ -113,6 +115,7 @@ curl -X POST "https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/run" \
   -d '{
     "input": {
       "action": "generate",
+      "workflow": "image-to-video",
       "prompt": "The subject comes to life with gentle movement",
       "input_image": "https://example.com/image.png",
       "duration_seconds": 4,
@@ -183,6 +186,7 @@ curl -X POST "https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/runsync" \
 | `model` | string | `distilled-fp8` | Model variant |
 | `with_audio` | bool | true | Generate audio |
 | `input_image` | string | null | Image URL for I2V |
+| `workflow` | string/object | `text-to-video-audio` | Built-in workflow name or full ComfyUI API prompt |
 
 ## Example Prompts
 

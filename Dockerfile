@@ -1,7 +1,7 @@
 # LTX-2 Video + Audio Generation Worker for RunPod Serverless
 # Lightweight image - models download to network volume at runtime
 
-FROM python:3.11-slim
+FROM runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
