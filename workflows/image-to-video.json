@@ -1,0 +1,91 @@
+{
+  "name": "LTX-2 Image to Video",
+  "description": "Animate a static image into video with optional audio",
+  "version": "1.0.0",
+  "workflow": {
+    "1": {
+      "class_type": "LTXVLoader",
+      "inputs": {
+        "ckpt_name": "ltx-2-19b-distilled-fp8.safetensors"
+      },
+      "_meta": {
+        "title": "Load LTX-2 Model"
+      }
+    },
+    "2": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "input_image.png"
+      },
+      "_meta": {
+        "title": "Load Input Image"
+      }
+    },
+    "3": {
+      "class_type": "LTXVTextEncode",
+      "inputs": {
+        "prompt": "The subject in the image comes to life with gentle movement, cinematic quality",
+        "negative_prompt": "blurry, low quality, distorted, static, frozen",
+        "ltxv_model": ["1", 0]
+      },
+      "_meta": {
+        "title": "Text Encode"
+      }
+    },
+    "4": {
+      "class_type": "LTXVImageToLatent",
+      "inputs": {
+        "image": ["2", 0],
+        "length": 97,
+        "ltxv_model": ["1", 0]
+      },
+      "_meta": {
+        "title": "Image to Latent"
+      }
+    },
+    "5": {
+      "class_type": "LTXVSampler",
+      "inputs": {
+        "seed": 42,
+        "steps": 8,
+        "cfg": 3.0,
+        "ltxv_model": ["1", 0],
+        "positive": ["3", 0],
+        "negative": ["3", 1],
+        "latent": ["4", 0]
+      },
+      "_meta": {
+        "title": "LTX-2 Sampler"
+      }
+    },
+    "6": {
+      "class_type": "LTXVDecode",
+      "inputs": {
+        "samples": ["5", 0],
+        "ltxv_model": ["1", 0]
+      },
+      "_meta": {
+        "title": "VAE Decode"
+      }
+    },
+    "7": {
+      "class_type": "VHS_VideoCombine",
+      "inputs": {
+        "images": ["6", 0],
+        "fps": 24,
+        "filename_prefix": "ltx2_i2v",
+        "format": "video/h264-mp4"
+      },
+      "_meta": {
+        "title": "Save Video"
+      }
+    }
+  },
+  "example_prompts": [
+    "The subject gently moves and breathes, natural subtle animation",
+    "Camera slowly zooms in while the subject looks around",
+    "Wind blows through the scene, leaves rustling, hair moving",
+    "The subject walks forward confidently, cinematic motion",
+    "Subtle parallax effect as camera moves, creating depth"
+  ]
+}

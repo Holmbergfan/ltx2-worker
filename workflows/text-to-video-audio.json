@@ -1,0 +1,95 @@
+{
+  "name": "LTX-2 Text to Video with Audio",
+  "description": "Generate video with synchronized audio from text prompt",
+  "version": "1.0.0",
+  "workflow": {
+    "1": {
+      "class_type": "LTXVLoader",
+      "inputs": {
+        "ckpt_name": "ltx-2-19b-distilled-fp8.safetensors"
+      },
+      "_meta": {
+        "title": "Load LTX-2 Model"
+      }
+    },
+    "2": {
+      "class_type": "LTXVTextEncode",
+      "inputs": {
+        "prompt": "A golden retriever running through a field of sunflowers, slow motion, cinematic lighting, 4K quality",
+        "negative_prompt": "blurry, low quality, distorted, watermark, text",
+        "ltxv_model": ["1", 0]
+      },
+      "_meta": {
+        "title": "Text Encode"
+      }
+    },
+    "3": {
+      "class_type": "EmptyLTXVLatentVideo",
+      "inputs": {
+        "width": 768,
+        "height": 512,
+        "length": 97,
+        "batch_size": 1
+      },
+      "_meta": {
+        "title": "Empty Latent (4 seconds @ 24fps)"
+      }
+    },
+    "4": {
+      "class_type": "LTXVSampler",
+      "inputs": {
+        "seed": 42,
+        "steps": 8,
+        "cfg": 3.0,
+        "ltxv_model": ["1", 0],
+        "positive": ["2", 0],
+        "negative": ["2", 1],
+        "latent": ["3", 0]
+      },
+      "_meta": {
+        "title": "LTX-2 Sampler"
+      }
+    },
+    "5": {
+      "class_type": "LTXVDecode",
+      "inputs": {
+        "samples": ["4", 0],
+        "ltxv_model": ["1", 0]
+      },
+      "_meta": {
+        "title": "VAE Decode"
+      }
+    },
+    "6": {
+      "class_type": "LTXVAudioGenerate",
+      "inputs": {
+        "prompt": "A golden retriever running through a field of sunflowers, slow motion, cinematic lighting, 4K quality",
+        "video": ["5", 0],
+        "ltxv_model": ["1", 0]
+      },
+      "_meta": {
+        "title": "Generate Audio"
+      }
+    },
+    "7": {
+      "class_type": "VHS_VideoCombine",
+      "inputs": {
+        "images": ["5", 0],
+        "audio": ["6", 0],
+        "fps": 24,
+        "filename_prefix": "ltx2_with_audio",
+        "format": "video/h264-mp4"
+      },
+      "_meta": {
+        "title": "Save Video with Audio"
+      }
+    }
+  },
+  "example_prompts": [
+    "A golden retriever running through a field of sunflowers, slow motion, cinematic lighting",
+    "An astronaut floating in space with Earth in the background, stars twinkling, peaceful ambient music",
+    "A chef preparing sushi in a traditional Japanese kitchen, close-up shots, ambient kitchen sounds",
+    "Ocean waves crashing on a rocky beach at sunset, drone shot, nature sounds",
+    "A futuristic city at night with flying cars and neon lights, rain, cyberpunk atmosphere"
+  ]
+}
