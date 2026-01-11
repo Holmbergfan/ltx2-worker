@@ -41,12 +41,11 @@ COMFY_URL = f"http://{COMFY_HOST}:{COMFY_PORT}"
 
 # HuggingFace
 HF_TOKEN = os.environ.get("HF_TOKEN", os.environ.get("HUGGINGFACE_HUB_TOKEN", ""))
-LTX_MODEL_REPO = os.environ.get("LTX_MODEL_REPO", "Lightricks/LTX-Video")
-LTX_MODEL_FILENAME = os.environ.get("LTX_MODEL_FILENAME", "ltx-video-2b-v0.9.5.safetensors")
-LTX_MODEL_URL = os.environ.get(
-    "LTX_MODEL_URL",
-    f"https://huggingface.co/{LTX_MODEL_REPO}/resolve/main/{LTX_MODEL_FILENAME}",
-)
+
+# LTX-2 (19B) Model - The newest and best model
+# Options: ltx-2-19b-distilled-fp8.safetensors (smaller), ltx-2-19b-dev-fp8.safetensors (larger)
+LTX2_MODEL_REPO = os.environ.get("LTX2_MODEL_REPO", "Lightricks/LTX-Video-0.9.7")
+LTX2_MODEL_FILENAME = os.environ.get("LTX2_MODEL_FILENAME", "ltx-2-19b-distilled-fp8.safetensors")
 
 # S3 Storage
 S3_BUCKET = os.environ.get("S3_BUCKET", "ltx2-models")
@@ -229,46 +228,56 @@ def fast_download(url: str, output_path: str, token: str = None):
     subprocess.run(cmd, check=True)
 
 def download_models(force: bool = False):
-    """Download LTX-Video models to network volume"""
+    """Download LTX-2 models to network volume"""
 
-    # LTX-Video model (2B v0.9.5 - 6.34GB)
-    model_path = f"{MODEL_DIR}/checkpoints/{LTX_MODEL_FILENAME}"
+    # LTX-2 (19B) main model - fp8 quantized (~20GB)
+    model_path = f"{MODEL_DIR}/checkpoints/{LTX2_MODEL_FILENAME}"
     if not os.path.exists(model_path) or force:
-        print(f"Downloading LTX-Video model ({LTX_MODEL_FILENAME})...")
+        print(f"Downloading LTX-2 model ({LTX2_MODEL_FILENAME})...")
         try:
-            # Try fast download with aria2c
-            fast_download(LTX_MODEL_URL, model_path, HF_TOKEN)
+            url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/{LTX2_MODEL_FILENAME}"
+            fast_download(url, model_path, HF_TOKEN)
         except Exception as e:
             print(f"aria2c failed ({e}), falling back to hf_hub_download...")
             hf_hub_download(
-                repo_id=LTX_MODEL_REPO,
-                filename=LTX_MODEL_FILENAME,
+                repo_id=LTX2_MODEL_REPO,
+                filename=LTX2_MODEL_FILENAME,
                 local_dir=f"{MODEL_DIR}/checkpoints",
                 token=HF_TOKEN or None,
             )
-        print("LTX-Video model downloaded!")
+        print("LTX-2 model downloaded!")
 
-    # T5 text encoder
-    t5_path = f"{MODEL_DIR}/text_encoders/t5xxl_fp16.safetensors"
-    if not os.path.exists(t5_path) or force:
-        print("Downloading T5 encoder (~10GB)...")
+    # Spatial Upscaler (required for high-res output)
+    spatial_path = f"{MODEL_DIR}/latent_upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+    if not os.path.exists(spatial_path) or force:
+        print("Downloading spatial upscaler...")
         try:
-            url = "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors"
-            fast_download(url, t5_path, HF_TOKEN)
+            url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+            fast_download(url, spatial_path, HF_TOKEN)
         except Exception as e:
-            print(f"aria2c failed ({e}), falling back to hf_hub_download...")
-            try:
-                hf_hub_download(
-                    repo_id="comfyanonymous/flux_text_encoders",
-                    filename="t5xxl_fp16.safetensors",
-                    local_dir=f"{MODEL_DIR}/text_encoders",
-                    token=HF_TOKEN or None,
-                )
-            except Exception as e2:
-                print(f"T5 download note: {e2}")
-        print("T5 encoder downloaded!")
+            print(f"Spatial upscaler download note: {e}")
 
-    print("All models ready!")
+    # Temporal Upscaler (for more frames)
+    temporal_path = f"{MODEL_DIR}/latent_upscale_models/ltx-2-temporal-upscaler-x2-1.0.safetensors"
+    if not os.path.exists(temporal_path) or force:
+        print("Downloading temporal upscaler...")
+        try:
+            url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-temporal-upscaler-x2-1.0.safetensors"
+            fast_download(url, temporal_path, HF_TOKEN)
+        except Exception as e:
+            print(f"Temporal upscaler download note: {e}")
+
+    # Distilled LoRA (for two-stage pipeline)
+    lora_path = f"{MODEL_DIR}/loras/ltx-2-19b-distilled-lora-384.safetensors"
+    if not os.path.exists(lora_path) or force:
+        print("Downloading distilled LoRA...")
+        try:
+            url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-19b-distilled-lora-384.safetensors"
+            fast_download(url, lora_path, HF_TOKEN)
+        except Exception as e:
+            print(f"Distilled LoRA download note: {e}")
+
+    print("All LTX-2 models ready!")
 
 def setup_environment():
     """Full setup on first run"""
@@ -565,7 +574,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 "status": "success",
                 "comfyui_installed": os.path.exists(f"{COMFY_HOME}/main.py"),
-                "model_exists": os.path.exists(f"{MODEL_DIR}/checkpoints/{LTX_MODEL_FILENAME}"),
+                "model_exists": os.path.exists(f"{MODEL_DIR}/checkpoints/{LTX2_MODEL_FILENAME}"),
                 "gpu": gpu,
             }
 
