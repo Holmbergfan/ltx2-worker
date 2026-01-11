@@ -105,10 +105,21 @@ def ensure_comfy_model_links():
         except OSError as e:
             print(f"Symlink for {subdir} failed: {e}")
 
+def install_comfyui_deps():
+    """Ensure ComfyUI dependencies are installed"""
+    req_file = f"{COMFY_HOME}/requirements.txt"
+    if os.path.exists(req_file):
+        print("Installing/updating ComfyUI dependencies...")
+        subprocess.run([
+            "pip", "install", "--no-cache-dir", "-q", "-r", req_file
+        ], check=False, timeout=300)
+
 def install_comfyui():
     """Install ComfyUI to network volume if not present"""
     if os.path.exists(f"{COMFY_HOME}/main.py"):
         print("ComfyUI already installed on network volume")
+        # Always ensure deps are up to date
+        install_comfyui_deps()
         return True
 
     print("Installing ComfyUI to network volume...")
@@ -240,6 +251,10 @@ def ensure_comfyui_running():
     if COMFY_PROCESS and COMFY_PROCESS.poll() is None:
         return
 
+    # Log file for ComfyUI output
+    log_path = Path(TMPDIR) / "comfyui.log"
+    log_file = open(log_path, "w")
+
     cmd = [
         sys.executable,
         f"{COMFY_HOME}/main.py",
@@ -247,19 +262,39 @@ def ensure_comfyui_running():
         COMFY_HOST,
         "--port",
         str(COMFY_PORT),
+        "--disable-auto-launch",
     ]
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
-    COMFY_PROCESS = subprocess.Popen(cmd, env=env)
 
-    for _ in range(60):
+    print(f"Starting ComfyUI: {' '.join(cmd)}")
+    COMFY_PROCESS = subprocess.Popen(
+        cmd,
+        env=env,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        cwd=COMFY_HOME
+    )
+
+    for i in range(120):  # Wait up to 2 minutes
+        # Check if process died
+        if COMFY_PROCESS.poll() is not None:
+            log_file.close()
+            log_content = log_path.read_text()[-5000:]  # Last 5000 chars
+            raise RuntimeError(f"ComfyUI exited with code {COMFY_PROCESS.returncode}. Log:\n{log_content}")
+
         try:
             resp = requests.get(f"{COMFY_URL}/history", timeout=2)
             if resp.status_code == 200:
+                print(f"ComfyUI started successfully after {i} seconds")
                 return
         except Exception:
-            time.sleep(1)
-    raise RuntimeError("ComfyUI failed to start or respond on /history")
+            pass
+        time.sleep(1)
+
+    log_file.close()
+    log_content = log_path.read_text()[-5000:]
+    raise RuntimeError(f"ComfyUI failed to respond after 120s. Log:\n{log_content}")
 
 def load_workflow_template(name: str) -> Dict[str, Any]:
     """Load a prompt-format workflow from /app/workflows."""
