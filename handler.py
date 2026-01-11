@@ -18,7 +18,7 @@ import subprocess
 import traceback
 import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 import runpod
 import boto3
@@ -638,10 +638,22 @@ def queue_prompt(prompt: Dict[str, Any]) -> str:
         error_detail = resp.text[:2000]
         raise RuntimeError(f"ComfyUI prompt rejected ({resp.status_code}): {error_detail}")
     data = resp.json()
-    return data["prompt_id"]
+    prompt_id = data["prompt_id"]
+    print(f"ComfyUI prompt queued: {prompt_id}")
+    return prompt_id
+
+def get_queue_snapshot() -> Optional[Dict[str, Any]]:
+    try:
+        resp = requests.get(f"{COMFY_URL}/queue", timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        return None
+    return None
 
 def wait_for_prompt(prompt_id: str, timeout_seconds: int = 1800) -> Dict[str, Any]:
     start = time.time()
+    last_log = 0.0
     while time.time() - start < timeout_seconds:
         resp = requests.get(f"{COMFY_URL}/history/{prompt_id}", timeout=10)
         if resp.status_code == 200:
@@ -651,6 +663,16 @@ def wait_for_prompt(prompt_id: str, timeout_seconds: int = 1800) -> Dict[str, An
                 outputs = entry.get("outputs")
                 if outputs:
                     return entry
+        now = time.time()
+        if now - last_log >= 30:
+            elapsed = int(now - start)
+            print(f"Waiting for prompt {prompt_id}... {elapsed}s elapsed")
+            queue = get_queue_snapshot()
+            if queue:
+                running = len(queue.get("queue_running", []))
+                pending = len(queue.get("queue_pending", []))
+                print(f"ComfyUI queue: running={running} pending={pending}")
+            last_log = now
         time.sleep(2)
     raise TimeoutError("ComfyUI prompt timed out")
 
@@ -685,6 +707,12 @@ def run_comfyui_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
     files = extract_output_files(entry)
     if not files:
         raise RuntimeError("No output files produced by ComfyUI")
+    print(f"ComfyUI produced {len(files)} file(s)")
+    for item in files:
+        filename = item.get("filename", "unknown")
+        out_type = item.get("type", "output")
+        subfolder = item.get("subfolder", "")
+        print(f"ComfyUI output: {filename} (type={out_type}, subfolder={subfolder})")
     return files
 
 # =============================================================================
