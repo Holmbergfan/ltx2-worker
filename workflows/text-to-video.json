@@ -1,0 +1,76 @@
+{
+  "name": "LTX Video Text-to-Video",
+  "description": "Generate video from text prompt using LTX-Video model",
+  "version": "1.0.0",
+  "workflow": {
+    "1": {
+      "class_type": "LTXVLoader",
+      "inputs": {
+        "ckpt_name": "ltx-video-2b-v0.9.5.safetensors"
+      },
+      "_meta": {
+        "title": "Load LTX Model"
+      }
+    },
+    "2": {
+      "class_type": "LTXVTextEncode",
+      "inputs": {
+        "prompt": "A beautiful sunset over the ocean with waves",
+        "negative_prompt": "blurry, low quality, distorted",
+        "ltxv_model": ["1", 0]
+      },
+      "_meta": {
+        "title": "Text Encode"
+      }
+    },
+    "3": {
+      "class_type": "EmptyLTXVLatentVideo",
+      "inputs": {
+        "width": 768,
+        "height": 512,
+        "length": 49,
+        "batch_size": 1
+      },
+      "_meta": {
+        "title": "Empty Latent"
+      }
+    },
+    "4": {
+      "class_type": "LTXVSampler",
+      "inputs": {
+        "seed": 42,
+        "steps": 25,
+        "cfg": 3.0,
+        "ltxv_model": ["1", 0],
+        "positive": ["2", 0],
+        "negative": ["2", 1],
+        "latent": ["3", 0]
+      },
+      "_meta": {
+        "title": "LTX Sampler"
+      }
+    },
+    "5": {
+      "class_type": "LTXVDecode",
+      "inputs": {
+        "samples": ["4", 0],
+        "ltxv_model": ["1", 0]
+      },
+      "_meta": {
+        "title": "VAE Decode"
+      }
+    },
+    "6": {
+      "class_type": "VHS_VideoCombine",
+      "inputs": {
+        "images": ["5", 0],
+        "fps": 24,
+        "filename_prefix": "ltxv_output",
+        "format": "video/h264-mp4"
+      },
+      "_meta": {
+        "title": "Save Video"
+      }
+    }
+  }
+}

@@ -393,7 +393,9 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
 def queue_prompt(prompt: Dict[str, Any]) -> str:
     payload = {"prompt": prompt, "client_id": "runpod-ltx2"}
     resp = requests.post(f"{COMFY_URL}/prompt", json=payload, timeout=10)
-    resp.raise_for_status()
+    if resp.status_code != 200:
+        error_detail = resp.text[:2000]
+        raise RuntimeError(f"ComfyUI prompt rejected ({resp.status_code}): {error_detail}")
     data = resp.json()
     return data["prompt_id"]
 
