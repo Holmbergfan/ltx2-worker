@@ -40,11 +40,16 @@ COMFY_PORT = int(os.environ.get("COMFY_PORT", "8188"))
 COMFY_URL = f"http://{COMFY_HOST}:{COMFY_PORT}"
 
 # HuggingFace
-HF_TOKEN = os.environ.get("HF_TOKEN", os.environ.get("HUGGINGFACE_HUB_TOKEN", ""))
+HF_TOKEN = (
+    os.environ.get("HF_TOKEN")
+    or os.environ.get("HUGGINGFACE_TOKEN")
+    or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+    or ""
+)
 
 # LTX-2 (19B) Model - The newest and best model
 # Options: ltx-2-19b-distilled-fp8.safetensors (smaller), ltx-2-19b-dev-fp8.safetensors (larger)
-LTX2_MODEL_REPO = os.environ.get("LTX2_MODEL_REPO", "Lightricks/LTX-Video-0.9.7")
+LTX2_MODEL_REPO = os.environ.get("LTX2_MODEL_REPO", "Lightricks/LTX-2")
 LTX2_MODEL_FILENAME = os.environ.get("LTX2_MODEL_FILENAME", "ltx-2-19b-distilled-fp8.safetensors")
 
 # S3 Storage
@@ -255,7 +260,16 @@ def download_models(force: bool = False):
             url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors"
             fast_download(url, spatial_path, HF_TOKEN)
         except Exception as e:
-            print(f"Spatial upscaler download note: {e}")
+            print(f"aria2c failed ({e}), falling back to hf_hub_download...")
+            try:
+                hf_hub_download(
+                    repo_id=LTX2_MODEL_REPO,
+                    filename="ltx-2-spatial-upscaler-x2-1.0.safetensors",
+                    local_dir=f"{MODEL_DIR}/latent_upscale_models",
+                    token=HF_TOKEN or None,
+                )
+            except Exception as e2:
+                print(f"Spatial upscaler download note: {e2}")
 
     # Temporal Upscaler (for more frames)
     temporal_path = f"{MODEL_DIR}/latent_upscale_models/ltx-2-temporal-upscaler-x2-1.0.safetensors"
@@ -265,7 +279,16 @@ def download_models(force: bool = False):
             url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-temporal-upscaler-x2-1.0.safetensors"
             fast_download(url, temporal_path, HF_TOKEN)
         except Exception as e:
-            print(f"Temporal upscaler download note: {e}")
+            print(f"aria2c failed ({e}), falling back to hf_hub_download...")
+            try:
+                hf_hub_download(
+                    repo_id=LTX2_MODEL_REPO,
+                    filename="ltx-2-temporal-upscaler-x2-1.0.safetensors",
+                    local_dir=f"{MODEL_DIR}/latent_upscale_models",
+                    token=HF_TOKEN or None,
+                )
+            except Exception as e2:
+                print(f"Temporal upscaler download note: {e2}")
 
     # Distilled LoRA (for two-stage pipeline)
     lora_path = f"{MODEL_DIR}/loras/ltx-2-19b-distilled-lora-384.safetensors"
@@ -275,7 +298,16 @@ def download_models(force: bool = False):
             url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-19b-distilled-lora-384.safetensors"
             fast_download(url, lora_path, HF_TOKEN)
         except Exception as e:
-            print(f"Distilled LoRA download note: {e}")
+            print(f"aria2c failed ({e}), falling back to hf_hub_download...")
+            try:
+                hf_hub_download(
+                    repo_id=LTX2_MODEL_REPO,
+                    filename="ltx-2-19b-distilled-lora-384.safetensors",
+                    local_dir=f"{MODEL_DIR}/loras",
+                    token=HF_TOKEN or None,
+                )
+            except Exception as e2:
+                print(f"Distilled LoRA download note: {e2}")
 
     print("All LTX-2 models ready!")
 
