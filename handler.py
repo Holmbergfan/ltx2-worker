@@ -749,11 +749,11 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     job_input = event.get("input", {})
 
     try:
+        action = job_input.get("action", "generate")
+
         setup_environment(preload_models=PRELOAD_MODELS and action != "sync_models")
         gpu = detect_gpu()
         print(f"GPU: {gpu['gpu_name']} ({gpu['vram_gb']}GB)")
-
-        action = job_input.get("action", "generate")
 
         if action == "sync_models":
             download_models(force=job_input.get("force", False))
