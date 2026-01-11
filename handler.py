@@ -569,6 +569,23 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 "gpu": gpu,
             }
 
+        if action == "list_nodes":
+            # Start ComfyUI and get available nodes
+            ensure_comfyui_running()
+            try:
+                resp = requests.get(f"{COMFY_URL}/object_info", timeout=30)
+                if resp.status_code == 200:
+                    nodes = list(resp.json().keys())
+                    ltx_nodes = [n for n in nodes if "ltx" in n.lower() or "LTX" in n]
+                    return {
+                        "status": "success",
+                        "total_nodes": len(nodes),
+                        "ltx_nodes": ltx_nodes,
+                        "gpu": gpu,
+                    }
+            except Exception as e:
+                return {"status": "error", "error": f"Failed to get nodes: {e}"}
+
         if action == "list_models":
             checkpoints = sorted(Path(f"{MODEL_DIR}/checkpoints").glob("*.safetensors"))
             loras = sorted(Path(f"{MODEL_DIR}/loras").glob("*.safetensors"))
