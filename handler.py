@@ -585,7 +585,10 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
     steps = job_input.get("steps")
     cfg = job_input.get("cfg_scale")
     seed = job_input.get("seed")
+    image_strength = job_input.get("image_strength")
     model_choice = job_input.get("model")
+    input_image = job_input.get("input_image")
+    has_load_image = False
 
     if model_choice:
         normalized = str(model_choice).strip().lower()
@@ -649,9 +652,15 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
             inputs["fps"] = float(fps)
 
         if class_type == "LoadImage":
-            input_image = job_input.get("input_image")
+            has_load_image = True
             if input_image:
                 inputs["image"] = download_input_image(input_image)
+
+        if class_type == "LTXVImgToVideoInplace" and image_strength is not None:
+            inputs["strength"] = float(image_strength)
+
+    if has_load_image and not input_image:
+        raise ValueError("input_image is required for image-to-video workflows")
 
     return workflow
 
