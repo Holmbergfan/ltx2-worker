@@ -92,7 +92,15 @@ def ensure_comfy_model_links():
     global COMFY_RESTART_REQUIRED
     comfy_models = f"{COMFY_HOME}/models"
     if os.path.islink(comfy_models):
-        return
+        target = os.readlink(comfy_models)
+        if os.path.abspath(target) == os.path.abspath(MODEL_DIR):
+            return
+        try:
+            os.unlink(comfy_models)
+            COMFY_RESTART_REQUIRED = True
+        except OSError as e:
+            print(f"Failed to remove models symlink ({e}); leaving as-is.")
+            return
 
     if not os.path.exists(comfy_models):
         os.makedirs(os.path.dirname(comfy_models), exist_ok=True)
@@ -263,7 +271,7 @@ def download_hf_file(repo_id: str, filename: str, dest_dir: str, token: str = No
     """Download a single file from Hugging Face into dest_dir."""
     dest_path = Path(dest_dir) / filename
     if dest_path.exists():
-        return
+        return False
 
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -279,13 +287,14 @@ def download_hf_file(repo_id: str, filename: str, dest_dir: str, token: str = No
             local_dir=dest_dir,
             token=token or None,
         )
+    return True
 
 def download_gemma_text_encoder(token: str = None):
     """Download Gemma text encoder repo if missing."""
     gemma_root = Path(MODEL_DIR) / "text_encoders" / GEMMA_DIRNAME
     required_file = gemma_root / "model-00001-of-00005.safetensors"
     if required_file.exists():
-        return
+        return False
 
     print(f"Downloading Gemma text encoder ({GEMMA_REPO})...")
     gemma_root.mkdir(parents=True, exist_ok=True)
@@ -296,6 +305,7 @@ def download_gemma_text_encoder(token: str = None):
         local_dir_use_symlinks=False,
     )
     print("Gemma text encoder downloaded!")
+    return True
 
 def ensure_required_models(workflow: Dict[str, Any]):
     """Ensure required models are present based on the workflow."""
@@ -305,6 +315,7 @@ def ensure_required_models(workflow: Dict[str, Any]):
         "latent_upscale_models": set(),
         "text_encoders": set(),
     }
+    downloaded_any = False
 
     for node in workflow.values():
         class_type = node.get("class_type")
@@ -340,27 +351,35 @@ def ensure_required_models(workflow: Dict[str, Any]):
 
     for ckpt_name in sorted(required["checkpoints"]):
         if ckpt_name.startswith("ltx-2-"):
-            download_hf_file(LTX2_MODEL_REPO, ckpt_name, f"{MODEL_DIR}/checkpoints", HF_TOKEN)
+            if download_hf_file(LTX2_MODEL_REPO, ckpt_name, f"{MODEL_DIR}/checkpoints", HF_TOKEN):
+                downloaded_any = True
         else:
             print(f"Checkpoint not found locally and repo unknown: {ckpt_name}")
 
     for lora_name in sorted(required["loras"]):
         if lora_name.startswith("ltx-2-"):
-            download_hf_file(LTX2_MODEL_REPO, lora_name, f"{MODEL_DIR}/loras", HF_TOKEN)
+            if download_hf_file(LTX2_MODEL_REPO, lora_name, f"{MODEL_DIR}/loras", HF_TOKEN):
+                downloaded_any = True
         else:
             print(f"LoRA not found locally and repo unknown: {lora_name}")
 
     for model_name in sorted(required["latent_upscale_models"]):
         if model_name.startswith("ltx-2-"):
-            download_hf_file(LTX2_MODEL_REPO, model_name, f"{MODEL_DIR}/latent_upscale_models", HF_TOKEN)
+            if download_hf_file(LTX2_MODEL_REPO, model_name, f"{MODEL_DIR}/latent_upscale_models", HF_TOKEN):
+                downloaded_any = True
         else:
             print(f"Upscaler not found locally and repo unknown: {model_name}")
 
     for encoder_path in sorted(required["text_encoders"]):
         if encoder_path.startswith(f"{GEMMA_DIRNAME}/") or encoder_path == GEMMA_DIRNAME:
-            download_gemma_text_encoder(HF_TOKEN)
+            if download_gemma_text_encoder(HF_TOKEN):
+                downloaded_any = True
         else:
             print(f"Text encoder not found locally and repo unknown: {encoder_path}")
+
+    if downloaded_any:
+        global COMFY_RESTART_REQUIRED
+        COMFY_RESTART_REQUIRED = True
 
 def download_models(force: bool = False):
     """Download LTX-2 models to network volume"""
