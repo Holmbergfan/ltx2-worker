@@ -104,13 +104,13 @@ def install_comfyui():
 def download_models(force: bool = False):
     """Download LTX-Video models to network volume"""
 
-    # LTX-Video model
-    model_path = f"{MODEL_DIR}/checkpoints/ltx-video-2b-v0.9.7.safetensors"
+    # LTX-Video model (2B v0.9.5 - 6.34GB)
+    model_path = f"{MODEL_DIR}/checkpoints/ltx-video-2b-v0.9.5.safetensors"
     if not os.path.exists(model_path) or force:
-        print("Downloading LTX-Video model (~5GB)...")
+        print("Downloading LTX-Video model (~6GB)...")
         hf_hub_download(
             repo_id="Lightricks/LTX-Video",
-            filename="ltx-video-2b-v0.9.7.safetensors",
+            filename="ltx-video-2b-v0.9.5.safetensors",
             local_dir=f"{MODEL_DIR}/checkpoints",
             token=HF_TOKEN or None,
         )
@@ -221,7 +221,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 "status": "success",
                 "comfyui_installed": os.path.exists(f"{COMFY_HOME}/main.py"),
-                "model_exists": os.path.exists(f"{MODEL_DIR}/checkpoints/ltx-video-2b-v0.9.7.safetensors"),
+                "model_exists": os.path.exists(f"{MODEL_DIR}/checkpoints/ltx-video-2b-v0.9.5.safetensors"),
                 "gpu": gpu,
             }
 
