@@ -23,7 +23,7 @@ from typing import Dict, Any, List
 import runpod
 import boto3
 import requests
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download, snapshot_download
 
 # Enable fast HF downloads (must be set before any HF calls)
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
@@ -32,9 +32,10 @@ os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 # Configuration
 # =============================================================================
 
-MODEL_DIR = os.environ.get("MODEL_DIR", "/runpod-volume/models")
-COMFY_HOME = os.environ.get("COMFY_HOME", "/runpod-volume/ComfyUI")
-TMPDIR = os.environ.get("TMPDIR", "/runpod-volume/tmp")
+DEFAULT_ROOT = "/runpod-volume" if os.path.exists("/runpod-volume") else "/workspace"
+MODEL_DIR = os.environ.get("MODEL_DIR", f"{DEFAULT_ROOT}/models")
+COMFY_HOME = os.environ.get("COMFY_HOME", f"{DEFAULT_ROOT}/ComfyUI")
+TMPDIR = os.environ.get("TMPDIR", f"{DEFAULT_ROOT}/tmp")
 COMFY_HOST = os.environ.get("COMFY_HOST", "127.0.0.1")
 COMFY_PORT = int(os.environ.get("COMFY_PORT", "8188"))
 COMFY_URL = f"http://{COMFY_HOST}:{COMFY_PORT}"
@@ -51,6 +52,9 @@ HF_TOKEN = (
 # Options: ltx-2-19b-distilled-fp8.safetensors (smaller), ltx-2-19b-dev-fp8.safetensors (larger)
 LTX2_MODEL_REPO = os.environ.get("LTX2_MODEL_REPO", "Lightricks/LTX-2")
 LTX2_MODEL_FILENAME = os.environ.get("LTX2_MODEL_FILENAME", "ltx-2-19b-distilled-fp8.safetensors")
+GEMMA_REPO = os.environ.get("GEMMA_REPO", "google/gemma-3-12b-it-qat-q4_0-unquantized")
+GEMMA_DIRNAME = os.environ.get("GEMMA_DIRNAME", "gemma-3-12b-it-qat-q4_0-unquantized")
+PRELOAD_MODELS = os.environ.get("PRELOAD_MODELS", "").lower() in ("1", "true", "yes")
 
 # S3 Storage
 S3_BUCKET = os.environ.get("S3_BUCKET", "ltx2-models")
@@ -61,6 +65,7 @@ AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
 PRESIGNED_URL_EXPIRY = int(os.environ.get("PRESIGNED_URL_EXPIRY", 14400))
 
 COMFY_PROCESS = None
+COMFY_RESTART_REQUIRED = False
 
 # =============================================================================
 # Setup Functions - Download at Runtime to Network Volume
@@ -84,6 +89,7 @@ def ensure_directories():
 
 def ensure_comfy_model_links():
     """Expose MODEL_DIR to ComfyUI models directory"""
+    global COMFY_RESTART_REQUIRED
     comfy_models = f"{COMFY_HOME}/models"
     if os.path.islink(comfy_models):
         return
@@ -99,7 +105,7 @@ def ensure_comfy_model_links():
 
     # If models dir exists, link subfolders to keep ComfyUI happy
     os.makedirs(comfy_models, exist_ok=True)
-    for subdir in ["checkpoints", "text_encoders", "vae", "clip"]:
+    for subdir in ["checkpoints", "text_encoders", "vae", "clip", "loras", "latent_upscale_models"]:
         src = os.path.join(MODEL_DIR, subdir)
         dst = os.path.join(comfy_models, subdir)
         if os.path.exists(dst) or os.path.islink(dst):
@@ -108,6 +114,27 @@ def ensure_comfy_model_links():
             os.symlink(src, dst)
         except OSError as e:
             print(f"Symlink for {subdir} failed: {e}")
+
+    # Ensure ComfyUI picks up MODEL_DIR even if models/ exists without symlinks.
+    extra_paths_path = Path(COMFY_HOME) / "extra_model_paths.yaml"
+    extra_block = f"""ltx2:
+  base_path: {MODEL_DIR}
+  checkpoints: checkpoints
+  text_encoders: |
+    text_encoders
+    clip
+  loras: loras
+  latent_upscale_models: latent_upscale_models
+  vae: vae
+"""
+    if extra_paths_path.exists():
+        existing = extra_paths_path.read_text(encoding="utf-8")
+        if MODEL_DIR not in existing:
+            extra_paths_path.write_text(existing.rstrip() + "\n\n" + extra_block, encoding="utf-8")
+            COMFY_RESTART_REQUIRED = True
+    else:
+        extra_paths_path.write_text(extra_block, encoding="utf-8")
+        COMFY_RESTART_REQUIRED = True
 
 def install_comfyui_deps():
     """Ensure ComfyUI dependencies are installed"""
@@ -232,6 +259,109 @@ def fast_download(url: str, output_path: str, token: str = None):
     print(f"Downloading with aria2c (16 connections): {os.path.basename(output_path)}")
     subprocess.run(cmd, check=True)
 
+def download_hf_file(repo_id: str, filename: str, dest_dir: str, token: str = None):
+    """Download a single file from Hugging Face into dest_dir."""
+    dest_path = Path(dest_dir) / filename
+    if dest_path.exists():
+        return
+
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if "/" in filename:
+            raise ValueError("nested path")
+        url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+        fast_download(url, str(dest_path), token)
+    except Exception as e:
+        print(f"aria2c failed ({e}), falling back to hf_hub_download...")
+        hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            local_dir=dest_dir,
+            token=token or None,
+        )
+
+def download_gemma_text_encoder(token: str = None):
+    """Download Gemma text encoder repo if missing."""
+    gemma_root = Path(MODEL_DIR) / "text_encoders" / GEMMA_DIRNAME
+    required_file = gemma_root / "model-00001-of-00005.safetensors"
+    if required_file.exists():
+        return
+
+    print(f"Downloading Gemma text encoder ({GEMMA_REPO})...")
+    gemma_root.mkdir(parents=True, exist_ok=True)
+    snapshot_download(
+        repo_id=GEMMA_REPO,
+        local_dir=str(gemma_root),
+        token=token or None,
+        local_dir_use_symlinks=False,
+    )
+    print("Gemma text encoder downloaded!")
+
+def ensure_required_models(workflow: Dict[str, Any]):
+    """Ensure required models are present based on the workflow."""
+    required = {
+        "checkpoints": set(),
+        "loras": set(),
+        "latent_upscale_models": set(),
+        "text_encoders": set(),
+    }
+
+    for node in workflow.values():
+        class_type = node.get("class_type")
+        inputs = node.get("inputs", {})
+
+        if class_type in {"CheckpointLoaderSimple", "LowVRAMCheckpointLoader"}:
+            ckpt_name = inputs.get("ckpt_name")
+            if ckpt_name:
+                required["checkpoints"].add(ckpt_name)
+
+        if class_type == "LTXVAudioVAELoader":
+            ckpt_name = inputs.get("ckpt_name")
+            if ckpt_name:
+                required["checkpoints"].add(ckpt_name)
+
+        if class_type == "LTXVGemmaCLIPModelLoader":
+            gemma_path = inputs.get("gemma_path")
+            ltxv_path = inputs.get("ltxv_path")
+            if gemma_path:
+                required["text_encoders"].add(gemma_path)
+            if ltxv_path:
+                required["checkpoints"].add(ltxv_path)
+
+        if class_type in {"LoraLoaderModelOnly", "LTXVQ8LoraModelLoader"}:
+            lora_name = inputs.get("lora_name")
+            if lora_name:
+                required["loras"].add(lora_name)
+
+        if class_type in {"LatentUpscaleModelLoader", "LowVRAMLatentUpscaleModelLoader"}:
+            model_name = inputs.get("model_name")
+            if model_name:
+                required["latent_upscale_models"].add(model_name)
+
+    for ckpt_name in sorted(required["checkpoints"]):
+        if ckpt_name.startswith("ltx-2-"):
+            download_hf_file(LTX2_MODEL_REPO, ckpt_name, f"{MODEL_DIR}/checkpoints", HF_TOKEN)
+        else:
+            print(f"Checkpoint not found locally and repo unknown: {ckpt_name}")
+
+    for lora_name in sorted(required["loras"]):
+        if lora_name.startswith("ltx-2-"):
+            download_hf_file(LTX2_MODEL_REPO, lora_name, f"{MODEL_DIR}/loras", HF_TOKEN)
+        else:
+            print(f"LoRA not found locally and repo unknown: {lora_name}")
+
+    for model_name in sorted(required["latent_upscale_models"]):
+        if model_name.startswith("ltx-2-"):
+            download_hf_file(LTX2_MODEL_REPO, model_name, f"{MODEL_DIR}/latent_upscale_models", HF_TOKEN)
+        else:
+            print(f"Upscaler not found locally and repo unknown: {model_name}")
+
+    for encoder_path in sorted(required["text_encoders"]):
+        if encoder_path.startswith(f"{GEMMA_DIRNAME}/") or encoder_path == GEMMA_DIRNAME:
+            download_gemma_text_encoder(HF_TOKEN)
+        else:
+            print(f"Text encoder not found locally and repo unknown: {encoder_path}")
+
 def download_models(force: bool = False):
     """Download LTX-2 models to network volume"""
 
@@ -311,7 +441,7 @@ def download_models(force: bool = False):
 
     print("All LTX-2 models ready!")
 
-def setup_environment():
+def setup_environment(preload_models: bool = False):
     """Full setup on first run"""
     print("=" * 50)
     print("Setting up LTX-2 environment on network volume...")
@@ -321,7 +451,8 @@ def setup_environment():
     install_comfyui()
     ensure_custom_nodes()  # Ensure LTX-Video nodes are installed
     ensure_comfy_model_links()
-    download_models()
+    if preload_models:
+        download_models()
 
     print("Setup complete!")
 
@@ -331,10 +462,20 @@ def setup_environment():
 
 def ensure_comfyui_running():
     """Start ComfyUI once per worker and wait for the API to respond."""
-    global COMFY_PROCESS
+    global COMFY_PROCESS, COMFY_RESTART_REQUIRED
 
     if COMFY_PROCESS and COMFY_PROCESS.poll() is None:
-        return
+        if COMFY_RESTART_REQUIRED:
+            print("Restarting ComfyUI to apply updated model paths...")
+            COMFY_PROCESS.terminate()
+            try:
+                COMFY_PROCESS.wait(timeout=10)
+            except Exception:
+                COMFY_PROCESS.kill()
+            COMFY_PROCESS = None
+            COMFY_RESTART_REQUIRED = False
+        else:
+            return
 
     # Log file for ComfyUI output
     log_path = Path(TMPDIR) / "comfyui.log"
@@ -589,7 +730,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     job_input = event.get("input", {})
 
     try:
-        setup_environment()
+        setup_environment(preload_models=PRELOAD_MODELS and action != "sync_models")
         gpu = detect_gpu()
         print(f"GPU: {gpu['gpu_name']} ({gpu['vram_gb']}GB)")
 
@@ -654,6 +795,9 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             # Optionally update workflow inputs if provided
             if any(k in job_input for k in ["prompt", "width", "height", "num_frames", "fps", "steps", "cfg_scale", "seed"]):
                 workflow = update_workflow_inputs(workflow, job_input)
+
+            # Ensure required models exist before sending to ComfyUI
+            ensure_required_models(workflow)
 
             outputs = run_comfyui_workflow(workflow)
 
