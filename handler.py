@@ -114,8 +114,13 @@ def install_comfyui_deps():
             "pip", "install", "--no-cache-dir", "-q", "-r", req_file
         ], check=False, timeout=300)
 
-def install_comfyui():
+def install_comfyui(force_reinstall: bool = False):
     """Install ComfyUI to network volume if not present"""
+    if force_reinstall and os.path.exists(COMFY_HOME):
+        print("Force reinstalling ComfyUI...")
+        import shutil
+        shutil.rmtree(COMFY_HOME, ignore_errors=True)
+
     if os.path.exists(f"{COMFY_HOME}/main.py"):
         print("ComfyUI already installed on network volume")
         # Always ensure deps are up to date
@@ -510,6 +515,10 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         if action == "sync_models":
             download_models(force=job_input.get("force", False))
             return {"status": "success", "action": "sync_models", "gpu": gpu}
+
+        if action == "reinstall_comfyui":
+            install_comfyui(force_reinstall=True)
+            return {"status": "success", "action": "reinstall_comfyui", "gpu": gpu}
 
         if action == "status":
             return {
