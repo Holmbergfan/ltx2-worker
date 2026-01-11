@@ -1,9 +1,10 @@
 # LTX-2 Video + Audio Generation Worker for RunPod Serverless
-# Extends the official RunPod ComfyUI worker (much smaller build)
+# Lightweight image - models download to network volume at runtime
 
-FROM runpod/worker-comfyui:5.5.1-base
+FROM python:3.11-slim
 
-ENV PYTHONUNBUFFERED=1 \
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     # HuggingFace cache to network volume
     HF_HOME=/runpod-volume/models/.cache/hf \
@@ -13,43 +14,35 @@ ENV PYTHONUNBUFFERED=1 \
     TMPDIR=/runpod-volume/tmp \
     # Model paths
     MODEL_DIR=/runpod-volume/models \
+    # ComfyUI path
+    COMFY_HOME=/runpod-volume/ComfyUI \
     # Enable faster HF downloads
     HF_HUB_ENABLE_HF_TRANSFER=1
 
-# Install LTX-Video custom nodes
-RUN cd /comfyui/custom_nodes && \
-    git clone --depth 1 https://github.com/Lightricks/ComfyUI-LTXVideo.git && \
-    cd ComfyUI-LTXVideo && \
-    pip install --no-cache-dir -r requirements.txt || true
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    git-lfs \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    wget \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && git lfs install
 
-# Install VideoHelperSuite for video handling
-RUN cd /comfyui/custom_nodes && \
-    git clone --depth 1 https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git && \
-    cd ComfyUI-VideoHelperSuite && \
-    pip install --no-cache-dir -r requirements.txt || true
+WORKDIR /app
 
-# Install additional dependencies
-RUN pip install --no-cache-dir \
-    boto3>=1.34 \
-    huggingface_hub[cli]>=0.24 \
-    hf_transfer>=0.1.8 \
-    requests>=2.32 \
-    decord>=0.6.0 \
-    librosa>=0.10.0 \
-    soundfile>=0.12.0 \
-    accelerate>=0.30.0
+# Install Python dependencies
+COPY requirements.txt /app/
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
 
-# Create model directories (will be symlinked to network volume)
-RUN mkdir -p /runpod-volume/models/diffusion_models \
-    /runpod-volume/models/text_encoders \
-    /runpod-volume/models/vae \
-    /runpod-volume/models/upscale_models \
-    /runpod-volume/models/.cache/hf \
-    /runpod-volume/tmp
+# Copy handler and workflows
+COPY handler.py /app/handler.py
+COPY workflows/ /app/workflows/
 
-# Copy custom handler
-COPY handler.py /handler.py
-COPY workflows/ /workflows/
-
-# Override the entry point to use our handler
-CMD ["python", "-u", "/handler.py"]
+# Start handler
+CMD ["python", "-u", "/app/handler.py"]

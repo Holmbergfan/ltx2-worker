@@ -1,43 +1,7 @@
-# RunPod LTX-2 Worker Dependencies
-# Based on vace-web worker patterns
-
-# RunPod
-runpod>=1.7.13
-
-# AWS S3
+# Minimal requirements - ComfyUI installs to network volume at runtime
+runpod>=1.7.0
 boto3>=1.34
-
-# HuggingFace
-huggingface_hub[cli]>=0.24
+huggingface_hub>=0.24
 hf_transfer>=0.1.8
-
-# HTTP & Utils
 requests>=2.32
-tqdm>=4.66
-
-# Image/Video processing
-pillow>=10.3
-numpy>=1.26
-opencv-python-headless>=4.9
-
-# Video handling
-decord>=0.6.0
-av>=12.0.0
-
-# Audio processing
-librosa>=0.10.0
-soundfile>=0.12.0
-
-# PyTorch (already in base image, but pin version for compatibility)
-# torch>=2.4.0
-# torchvision>=0.19.0
-# torchaudio>=2.4.0
-
-# Transformers for text encoding
-transformers>=4.40.0
-tokenizers>=0.19.0
-sentencepiece>=0.2.0
-accelerate>=0.30.0
-
-# Flash Attention (install separately with --no-build-isolation)
-# flash-attn>=2.5.0
+torch>=2.0.0
