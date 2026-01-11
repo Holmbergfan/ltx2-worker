@@ -23,6 +23,9 @@ import runpod
 import boto3
 from huggingface_hub import hf_hub_download
 
+# Enable fast HF downloads (must be set before any HF calls)
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -101,6 +104,23 @@ def install_comfyui():
         print(f"ComfyUI install error: {e}")
         return False
 
+def fast_download(url: str, output_path: str, token: str = None):
+    """Fast download using aria2c with parallel connections"""
+    headers = []
+    if token:
+        headers = ["--header", f"Authorization: Bearer {token}"]
+
+    cmd = [
+        "aria2c", "-x", "16", "-s", "16", "-k", "1M",
+        "--file-allocation=none",
+        "-d", os.path.dirname(output_path),
+        "-o", os.path.basename(output_path),
+        *headers,
+        url
+    ]
+    print(f"Downloading with aria2c (16 connections): {os.path.basename(output_path)}")
+    subprocess.run(cmd, check=True)
+
 def download_models(force: bool = False):
     """Download LTX-Video models to network volume"""
 
@@ -108,12 +128,18 @@ def download_models(force: bool = False):
     model_path = f"{MODEL_DIR}/checkpoints/ltx-video-2b-v0.9.5.safetensors"
     if not os.path.exists(model_path) or force:
         print("Downloading LTX-Video model (~6GB)...")
-        hf_hub_download(
-            repo_id="Lightricks/LTX-Video",
-            filename="ltx-video-2b-v0.9.5.safetensors",
-            local_dir=f"{MODEL_DIR}/checkpoints",
-            token=HF_TOKEN or None,
-        )
+        try:
+            # Try fast download with aria2c
+            url = "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.5.safetensors"
+            fast_download(url, model_path, HF_TOKEN)
+        except Exception as e:
+            print(f"aria2c failed ({e}), falling back to hf_hub_download...")
+            hf_hub_download(
+                repo_id="Lightricks/LTX-Video",
+                filename="ltx-video-2b-v0.9.5.safetensors",
+                local_dir=f"{MODEL_DIR}/checkpoints",
+                token=HF_TOKEN or None,
+            )
         print("LTX-Video model downloaded!")
 
     # T5 text encoder
@@ -121,15 +147,20 @@ def download_models(force: bool = False):
     if not os.path.exists(t5_path) or force:
         print("Downloading T5 encoder (~10GB)...")
         try:
-            hf_hub_download(
-                repo_id="comfyanonymous/flux_text_encoders",
-                filename="t5xxl_fp16.safetensors",
-                local_dir=f"{MODEL_DIR}/text_encoders",
-                token=HF_TOKEN or None,
-            )
-            print("T5 encoder downloaded!")
+            url = "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors"
+            fast_download(url, t5_path, HF_TOKEN)
         except Exception as e:
-            print(f"T5 download note: {e}")
+            print(f"aria2c failed ({e}), falling back to hf_hub_download...")
+            try:
+                hf_hub_download(
+                    repo_id="comfyanonymous/flux_text_encoders",
+                    filename="t5xxl_fp16.safetensors",
+                    local_dir=f"{MODEL_DIR}/text_encoders",
+                    token=HF_TOKEN or None,
+                )
+            except Exception as e2:
+                print(f"T5 download note: {e2}")
+        print("T5 encoder downloaded!")
 
     print("All models ready!")
 

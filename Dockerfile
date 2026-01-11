@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     wget \
     curl \
+    aria2 \
     && rm -rf /var/lib/apt/lists/* \
     && git lfs install
 
