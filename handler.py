@@ -52,6 +52,7 @@ HF_TOKEN = (
 # Options: ltx-2-19b-distilled-fp8.safetensors (smaller), ltx-2-19b-dev-fp8.safetensors (larger)
 LTX2_MODEL_REPO = os.environ.get("LTX2_MODEL_REPO", "Lightricks/LTX-2")
 LTX2_MODEL_FILENAME = os.environ.get("LTX2_MODEL_FILENAME", "ltx-2-19b-distilled-fp8.safetensors")
+LTX2_FULL_MODEL_FILENAME = os.environ.get("LTX2_FULL_MODEL_FILENAME", "ltx-2-19b-dev-fp8.safetensors")
 GEMMA_REPO = os.environ.get("GEMMA_REPO", "google/gemma-3-12b-it-qat-q4_0-unquantized")
 GEMMA_DIRNAME = os.environ.get("GEMMA_DIRNAME", "gemma-3-12b-it-qat-q4_0-unquantized")
 PRELOAD_MODELS = os.environ.get("PRELOAD_MODELS", "").lower() in ("1", "true", "yes")
@@ -584,6 +585,15 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
     steps = job_input.get("steps")
     cfg = job_input.get("cfg_scale")
     seed = job_input.get("seed")
+    model_choice = job_input.get("model")
+
+    if model_choice:
+        normalized = str(model_choice).strip().lower()
+        use_full = normalized in ("full", "dev", "19b", "full-fp8", "ltx-2-19b-dev")
+        selected_ckpt = LTX2_FULL_MODEL_FILENAME if use_full else LTX2_MODEL_FILENAME
+        lora_strength = 0.0 if use_full else 1.0
+        lora_name = "ltx-2-19b-distilled-lora-384.safetensors"
+        gemma_default = f"{GEMMA_DIRNAME}/model-00001-of-00005.safetensors"
 
     if fps is None:
         fps = 24
@@ -593,6 +603,20 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
     for node in workflow.values():
         class_type = node.get("class_type")
         inputs = node.get("inputs", {})
+
+        if class_type == "CheckpointLoaderSimple" and model_choice:
+            inputs["ckpt_name"] = selected_ckpt
+
+        if class_type == "LTXVAudioVAELoader" and model_choice:
+            inputs["ckpt_name"] = selected_ckpt
+
+        if class_type == "LTXVGemmaCLIPModelLoader" and model_choice:
+            inputs["ltxv_path"] = selected_ckpt
+            inputs.setdefault("gemma_path", gemma_default)
+
+        if class_type == "LoraLoaderModelOnly" and model_choice:
+            inputs["lora_name"] = lora_name
+            inputs["strength_model"] = float(lora_strength)
 
         if class_type == "CLIPTextEncode" and prompt is not None:
             inputs["text"] = prompt
