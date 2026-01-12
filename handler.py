@@ -17,6 +17,7 @@ import uuid
 import subprocess
 import traceback
 import json
+import shutil
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -48,13 +49,38 @@ COMFY_HOME = os.environ.get("COMFY_HOME", f"{DEFAULT_ROOT}/ComfyUI")
 TMPDIR = os.environ.get("TMPDIR", f"{DEFAULT_ROOT}/tmp")
 
 # If the configured path doesn't exist, fall back to /workspace.
+if not os.path.ismount("/runpod-volume") and os.path.ismount("/workspace"):
+    if MODEL_DIR.startswith("/runpod-volume"):
+        print("Warning: /runpod-volume not mounted, falling back to /workspace for MODEL_DIR.")
+        MODEL_DIR = "/workspace/models"
+    if COMFY_HOME.startswith("/runpod-volume"):
+        print("Warning: /runpod-volume not mounted, falling back to /workspace for COMFY_HOME.")
+        COMFY_HOME = "/workspace/ComfyUI"
+    if TMPDIR.startswith("/runpod-volume"):
+        print("Warning: /runpod-volume not mounted, falling back to /workspace for TMPDIR.")
+        TMPDIR = "/workspace/tmp"
+
 if not os.path.exists(MODEL_DIR) and os.path.exists("/workspace"):
     MODEL_DIR = "/workspace/models"
     COMFY_HOME = "/workspace/ComfyUI"
     TMPDIR = "/workspace/tmp"
 
+def log_disk_usage(path: str):
+    try:
+        total, used, free = shutil.disk_usage(path)
+        print(
+            "Disk usage for %s: total=%.1fGB used=%.1fGB free=%.1fGB"
+            % (path, total / (1024**3), used / (1024**3), free / (1024**3))
+        )
+    except FileNotFoundError:
+        print(f"Disk usage for {path}: path not found")
+
 print(f"Using storage root: {DEFAULT_ROOT}")
 print(f"MODEL_DIR={MODEL_DIR}")
+print(f"COMFY_HOME={COMFY_HOME}")
+print(f"TMPDIR={TMPDIR}")
+log_disk_usage("/workspace")
+log_disk_usage("/runpod-volume")
 COMFY_HOST = os.environ.get("COMFY_HOST", "127.0.0.1")
 COMFY_PORT = int(os.environ.get("COMFY_PORT", "8188"))
 COMFY_URL = f"http://{COMFY_HOST}:{COMFY_PORT}"
