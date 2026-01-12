@@ -32,10 +32,29 @@ os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 # Configuration
 # =============================================================================
 
-DEFAULT_ROOT = "/runpod-volume" if os.path.exists("/runpod-volume") else "/workspace"
+def resolve_default_root() -> str:
+    if os.path.ismount("/runpod-volume"):
+        return "/runpod-volume"
+    if os.path.ismount("/workspace"):
+        return "/workspace"
+    if os.path.exists("/workspace"):
+        return "/workspace"
+    return "/runpod-volume"
+
+
+DEFAULT_ROOT = resolve_default_root()
 MODEL_DIR = os.environ.get("MODEL_DIR", f"{DEFAULT_ROOT}/models")
 COMFY_HOME = os.environ.get("COMFY_HOME", f"{DEFAULT_ROOT}/ComfyUI")
 TMPDIR = os.environ.get("TMPDIR", f"{DEFAULT_ROOT}/tmp")
+
+# If the configured path doesn't exist, fall back to /workspace.
+if not os.path.exists(MODEL_DIR) and os.path.exists("/workspace"):
+    MODEL_DIR = "/workspace/models"
+    COMFY_HOME = "/workspace/ComfyUI"
+    TMPDIR = "/workspace/tmp"
+
+print(f"Using storage root: {DEFAULT_ROOT}")
+print(f"MODEL_DIR={MODEL_DIR}")
 COMFY_HOST = os.environ.get("COMFY_HOST", "127.0.0.1")
 COMFY_PORT = int(os.environ.get("COMFY_PORT", "8188"))
 COMFY_URL = f"http://{COMFY_HOST}:{COMFY_PORT}"
