@@ -34,10 +34,13 @@ os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 # =============================================================================
 
 def resolve_default_root() -> str:
+    # Prioritize /runpod-volume (network volume) over /workspace (ephemeral container storage)
     if os.path.ismount("/runpod-volume"):
         return "/runpod-volume"
     if os.path.ismount("/workspace"):
         return "/workspace"
+    if os.path.exists("/runpod-volume"):
+        return "/runpod-volume"
     if os.path.exists("/workspace"):
         return "/workspace"
     return "/runpod-volume"
@@ -48,22 +51,18 @@ MODEL_DIR = os.environ.get("MODEL_DIR", f"{DEFAULT_ROOT}/models")
 COMFY_HOME = os.environ.get("COMFY_HOME", f"{DEFAULT_ROOT}/ComfyUI")
 TMPDIR = os.environ.get("TMPDIR", f"{DEFAULT_ROOT}/tmp")
 
-# If the configured path doesn't exist, fall back to /workspace.
-if not os.path.ismount("/runpod-volume") and os.path.ismount("/workspace"):
-    if MODEL_DIR.startswith("/runpod-volume"):
-        print("Warning: /runpod-volume not mounted, falling back to /workspace for MODEL_DIR.")
+# Only fall back to /workspace if /runpod-volume is NOT available at all
+if not os.path.ismount("/runpod-volume") and not os.path.exists("/runpod-volume"):
+    if os.path.ismount("/workspace") or os.path.exists("/workspace"):
+        print("Warning: /runpod-volume not available, falling back to /workspace.")
         MODEL_DIR = "/workspace/models"
-    if COMFY_HOME.startswith("/runpod-volume"):
-        print("Warning: /runpod-volume not mounted, falling back to /workspace for COMFY_HOME.")
         COMFY_HOME = "/workspace/ComfyUI"
-    if TMPDIR.startswith("/runpod-volume"):
-        print("Warning: /runpod-volume not mounted, falling back to /workspace for TMPDIR.")
         TMPDIR = "/workspace/tmp"
 
-if not os.path.exists(MODEL_DIR) and os.path.exists("/workspace"):
-    MODEL_DIR = "/workspace/models"
-    COMFY_HOME = "/workspace/ComfyUI"
-    TMPDIR = "/workspace/tmp"
+# Create directories on the network volume if they don't exist
+os.makedirs(MODEL_DIR, exist_ok=True)
+os.makedirs(COMFY_HOME, exist_ok=True)
+os.makedirs(TMPDIR, exist_ok=True)
 
 def log_disk_usage(path: str):
     try:
