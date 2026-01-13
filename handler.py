@@ -1137,7 +1137,9 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             )
             requires_prompt = isinstance(workflow_input, str) and "image" not in str(workflow_input).lower()
             if requires_prompt and not prompt_text and not input_image:
-                return {"status": "error", "error": "prompt is required for text-to-video workflows"}
+                error_msg = "prompt is required for text-to-video workflows"
+                _log_ltx2_event("validation_error", {"error": error_msg, "workflow": workflow_input})
+                return {"status": "error", "error": error_msg}
 
             # Optionally update workflow inputs if provided
             workflow_label = "<inline>" if isinstance(workflow_input, dict) else str(workflow_input)
@@ -1181,10 +1183,14 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 "execution_time": round(time.time() - start_time, 2),
             }
 
-        return {"status": "error", "error": f"Unknown action: {action}"}
+        error_result = {"status": "error", "error": f"Unknown action: {action}"}
+        _log_ltx2_event("handler_error", error_result)
+        return error_result
 
     except Exception as e:
-        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
+        error_result = {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
+        _log_ltx2_event("handler_exception", {"error": str(e)})
+        return error_result
 
 if __name__ == "__main__":
     print("LTX-2 Worker Starting...")
