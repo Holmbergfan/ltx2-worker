@@ -74,6 +74,135 @@ def log_disk_usage(path: str):
     except FileNotFoundError:
         print(f"Disk usage for {path}: path not found")
 
+
+def _sanitize_log_value(value, max_len: int = 800):
+    if isinstance(value, str):
+        if value.startswith("data:image"):
+            return f"[data:image;base64 length={len(value)}]"
+        if value.startswith("data:video"):
+            return f"[data:video;base64 length={len(value)}]"
+        if len(value) > max_len:
+            return value[:max_len] + f"... ({len(value)} chars)"
+        return value
+    if isinstance(value, list):
+        return [_sanitize_log_value(item, max_len=max_len) for item in value]
+    if isinstance(value, dict):
+        return {k: _sanitize_log_value(v, max_len=max_len) for k, v in value.items()}
+    return value
+
+
+def _log_ltx2_event(label: str, payload: Any) -> None:
+    try:
+        sanitized = _sanitize_log_value(payload)
+        print(f"[LTX2] {label}: {json.dumps(sanitized, ensure_ascii=True)}")
+    except Exception as exc:
+        print(f"[LTX2] {label}: <log failed: {exc}>")
+
+
+def _summarize_workflow(workflow: Dict[str, Any]) -> Dict[str, Any]:
+    summary: Dict[str, Any] = {"node_count": len(workflow)}
+    clip_texts: List[str] = []
+    ltxv_prompts: List[str] = []
+    ltxv_negative: List[str] = []
+    input_images: List[str] = []
+    sizes: List[Dict[str, Any]] = []
+    lengths: List[int] = []
+    fps_values: List[float] = []
+    noise_seeds: List[int] = []
+    sampler_params: List[Dict[str, Any]] = []
+    cfg_values: List[float] = []
+    image_strengths: List[float] = []
+
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        class_type = node.get("class_type")
+        inputs = node.get("inputs", {})
+
+        if class_type == "CLIPTextEncode":
+            text = inputs.get("text")
+            if text:
+                clip_texts.append(text)
+
+        if class_type == "LTXVTextEncode":
+            prompt = inputs.get("prompt")
+            if prompt:
+                ltxv_prompts.append(prompt)
+            negative_prompt = inputs.get("negative_prompt")
+            if negative_prompt:
+                ltxv_negative.append(negative_prompt)
+
+        if class_type == "LoadImage":
+            image = inputs.get("image")
+            if image:
+                input_images.append(image)
+
+        if class_type == "EmptyImage":
+            width = inputs.get("width")
+            height = inputs.get("height")
+            if width is not None or height is not None:
+                sizes.append({"width": width, "height": height})
+
+        if class_type == "EmptyLTXVLatentVideo":
+            length = inputs.get("length")
+            if length is not None:
+                lengths.append(int(length))
+
+        if class_type in {"LTXVConditioning", "CreateVideo"}:
+            value = inputs.get("frame_rate") if class_type == "LTXVConditioning" else inputs.get("fps")
+            if value is not None:
+                fps_values.append(float(value))
+
+        if class_type == "RandomNoise":
+            seed = inputs.get("noise_seed")
+            if seed is not None:
+                noise_seeds.append(int(seed))
+
+        if class_type == "LTXVSampler":
+            sampler_entry = {}
+            if inputs.get("seed") is not None:
+                sampler_entry["seed"] = int(inputs.get("seed"))
+            if inputs.get("steps") is not None:
+                sampler_entry["steps"] = int(inputs.get("steps"))
+            if inputs.get("cfg") is not None:
+                sampler_entry["cfg"] = float(inputs.get("cfg"))
+            if sampler_entry:
+                sampler_params.append(sampler_entry)
+
+        if class_type == "CFGGuider":
+            cfg = inputs.get("cfg")
+            if cfg is not None:
+                cfg_values.append(float(cfg))
+
+        if class_type == "LTXVImgToVideoInplace":
+            strength = inputs.get("strength")
+            if strength is not None:
+                image_strengths.append(float(strength))
+
+    if clip_texts:
+        summary["clip_texts"] = clip_texts
+    if ltxv_prompts:
+        summary["ltxv_prompts"] = ltxv_prompts
+    if ltxv_negative:
+        summary["ltxv_negative_prompts"] = ltxv_negative
+    if input_images:
+        summary["input_images"] = input_images
+    if sizes:
+        summary["sizes"] = sizes
+    if lengths:
+        summary["lengths"] = lengths
+    if fps_values:
+        summary["fps"] = fps_values
+    if noise_seeds:
+        summary["noise_seeds"] = noise_seeds
+    if sampler_params:
+        summary["sampler"] = sampler_params
+    if cfg_values:
+        summary["cfg"] = cfg_values
+    if image_strengths:
+        summary["image_strengths"] = image_strengths
+
+    return summary
 print(f"Using storage root: {DEFAULT_ROOT}")
 print(f"MODEL_DIR={MODEL_DIR}")
 print(f"COMFY_HOME={COMFY_HOME}")
@@ -919,9 +1048,11 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     """RunPod serverless handler"""
     start_time = time.time()
     job_input = event.get("input", {})
+    _log_ltx2_event("job_input", job_input)
 
     try:
         action = job_input.get("action", "generate")
+        _log_ltx2_event("action", {"action": action})
 
         setup_environment(preload_models=PRELOAD_MODELS and action != "sync_models")
         gpu = detect_gpu()
@@ -984,8 +1115,15 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 workflow = load_workflow_template(str(workflow_input))
 
             # Optionally update workflow inputs if provided
+            workflow_label = "<inline>" if isinstance(workflow_input, dict) else str(workflow_input)
+            _log_ltx2_event("workflow_selected", {"workflow": workflow_label})
+            updated = False
             if any(k in job_input for k in ["prompt", "negative_prompt", "width", "height", "num_frames", "fps", "steps", "cfg_scale", "seed", "duration_seconds", "input_image", "input_image_url", "image", "image_url", "image_strength", "model"]):
                 workflow = update_workflow_inputs(workflow, job_input)
+                updated = True
+            summary = _summarize_workflow(workflow)
+            summary["updated"] = updated
+            _log_ltx2_event("workflow_summary", summary)
 
             # Ensure required models exist before sending to ComfyUI
             ensure_required_models(workflow)
@@ -1000,6 +1138,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                     if path.suffix.lower() == ".gif":
                         content_type = "image/gif"
                     uploaded.append(upload_to_s3(str(path), content_type=content_type))
+
+            _log_ltx2_event("generation_outputs", uploaded)
 
             return {
                 "status": "success",
