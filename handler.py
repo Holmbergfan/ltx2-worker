@@ -209,6 +209,7 @@ print(f"Using storage root: {DEFAULT_ROOT}")
 print(f"MODEL_DIR={MODEL_DIR}")
 print(f"COMFY_HOME={COMFY_HOME}")
 print(f"TMPDIR={TMPDIR}")
+print(f"AUTO_SEED={AUTO_SEED}")
 log_disk_usage("/workspace")
 log_disk_usage("/runpod-volume")
 COMFY_HOST = os.environ.get("COMFY_HOST", "127.0.0.1")
@@ -773,8 +774,10 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
     conditioning_nodes: List[Dict[str, Any]] = []
     noise_offset = 0
 
-    if isinstance(prompt, str) and not prompt.strip():
-        prompt = None
+    if isinstance(prompt, str):
+        prompt = prompt.strip()
+    if not prompt:
+        prompt = "" if input_image else None
     if isinstance(negative_prompt, str) and not negative_prompt.strip():
         negative_prompt = None
     if isinstance(seed, str) and not seed.strip():
