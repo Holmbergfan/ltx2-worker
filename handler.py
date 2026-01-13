@@ -14,6 +14,7 @@ import os
 import sys
 import time
 import uuid
+import random
 import subprocess
 import traceback
 import json
@@ -50,6 +51,7 @@ DEFAULT_ROOT = resolve_default_root()
 MODEL_DIR = os.environ.get("MODEL_DIR", f"{DEFAULT_ROOT}/models")
 COMFY_HOME = os.environ.get("COMFY_HOME", f"{DEFAULT_ROOT}/ComfyUI")
 TMPDIR = os.environ.get("TMPDIR", f"{DEFAULT_ROOT}/tmp")
+AUTO_SEED = os.getenv("AUTO_SEED", "true").lower() == "true"
 
 # Only fall back to /workspace if /runpod-volume is NOT available at all
 if not os.path.ismount("/runpod-volume") and not os.path.exists("/runpod-volume"):
@@ -769,9 +771,16 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
     has_load_image = False
     clip_nodes: Dict[str, Dict[str, Any]] = {}
     conditioning_nodes: List[Dict[str, Any]] = []
+    noise_offset = 0
 
+    if isinstance(prompt, str) and not prompt.strip():
+        prompt = None
     if isinstance(negative_prompt, str) and not negative_prompt.strip():
         negative_prompt = None
+    if isinstance(seed, str) and not seed.strip():
+        seed = None
+    if seed is None and AUTO_SEED:
+        seed = random.randint(0, 2**31 - 1)
 
     if model_choice:
         normalized = str(model_choice).strip().lower()
@@ -839,7 +848,8 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
                 inputs["frame_rate"] = int(fps)
 
         if class_type == "RandomNoise" and seed is not None:
-            inputs["noise_seed"] = int(seed)
+            inputs["noise_seed"] = int(seed) + noise_offset
+            noise_offset += 1
 
         if class_type == "CFGGuider" and cfg is not None:
             inputs["cfg"] = float(cfg)
@@ -1114,6 +1124,18 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 # Try loading from template file
                 workflow = load_workflow_template(str(workflow_input))
 
+            prompt_value = job_input.get("prompt")
+            prompt_text = prompt_value.strip() if isinstance(prompt_value, str) else ""
+            input_image = (
+                job_input.get("input_image")
+                or job_input.get("input_image_url")
+                or job_input.get("image")
+                or job_input.get("image_url")
+            )
+            requires_prompt = isinstance(workflow_input, str) and "image" not in str(workflow_input).lower()
+            if requires_prompt and not prompt_text and not input_image:
+                return {"status": "error", "error": "prompt is required for text-to-video workflows"}
+
             # Optionally update workflow inputs if provided
             workflow_label = "<inline>" if isinstance(workflow_input, dict) else str(workflow_input)
             _log_ltx2_event("workflow_selected", {"workflow": workflow_label})
@@ -1123,6 +1145,14 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 updated = True
             summary = _summarize_workflow(workflow)
             summary["updated"] = updated
+            seed_value = job_input.get("seed")
+            seed_missing = seed_value is None or (isinstance(seed_value, str) and not seed_value.strip())
+            if seed_missing and AUTO_SEED:
+                summary["seed_source"] = "auto"
+            elif seed_missing:
+                summary["seed_source"] = "default"
+            else:
+                summary["seed_source"] = "client"
             _log_ltx2_event("workflow_summary", summary)
 
             # Ensure required models exist before sending to ComfyUI
