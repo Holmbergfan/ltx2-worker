@@ -631,8 +631,18 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
     seed = job_input.get("seed")
     image_strength = job_input.get("image_strength")
     model_choice = job_input.get("model")
-    input_image = job_input.get("input_image")
+    input_image = (
+        job_input.get("input_image")
+        or job_input.get("input_image_url")
+        or job_input.get("image")
+        or job_input.get("image_url")
+    )
     has_load_image = False
+    clip_nodes: Dict[str, Dict[str, Any]] = {}
+    conditioning_nodes: List[Dict[str, Any]] = []
+
+    if isinstance(negative_prompt, str) and not negative_prompt.strip():
+        negative_prompt = None
 
     if model_choice:
         normalized = str(model_choice).strip().lower()
@@ -642,14 +652,21 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         lora_name = "ltx-2-19b-distilled-lora-384.safetensors"
         gemma_default = f"{GEMMA_DIRNAME}/model-00001-of-00005.safetensors"
 
-    if fps is None:
+    apply_fps = fps is not None or duration_seconds is not None
+    if fps is None and duration_seconds is not None:
         fps = 24
-    if num_frames is None and duration_seconds:
+    if num_frames is None and duration_seconds is not None:
         num_frames = int(float(duration_seconds) * float(fps)) + 1
 
-    for node in workflow.values():
+    for node_id, node in list(workflow.items()):
         class_type = node.get("class_type")
         inputs = node.get("inputs", {})
+
+        if class_type == "CLIPTextEncode":
+            clip_nodes[str(node_id)] = node
+
+        if class_type == "LTXVConditioning":
+            conditioning_nodes.append(node)
 
         if class_type == "CheckpointLoaderSimple" and model_choice:
             inputs["ckpt_name"] = selected_ckpt
@@ -668,7 +685,13 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         if class_type == "CLIPTextEncode" and prompt is not None:
             inputs["text"] = prompt
 
-        if class_type == "LTXVConditioning" and fps is not None:
+        if class_type == "LTXVTextEncode":
+            if prompt is not None:
+                inputs["prompt"] = prompt
+            if negative_prompt is not None:
+                inputs["negative_prompt"] = negative_prompt
+
+        if class_type == "LTXVConditioning" and apply_fps:
             inputs["frame_rate"] = float(fps)
 
         if class_type == "EmptyImage":
@@ -683,7 +706,7 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         if class_type == "LTXVEmptyLatentAudio":
             if num_frames is not None:
                 inputs["frames_number"] = int(num_frames)
-            if fps is not None:
+            if apply_fps:
                 inputs["frame_rate"] = int(fps)
 
         if class_type == "RandomNoise" and seed is not None:
@@ -692,7 +715,7 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         if class_type == "CFGGuider" and cfg is not None:
             inputs["cfg"] = float(cfg)
 
-        if class_type == "CreateVideo" and fps is not None:
+        if class_type == "CreateVideo" and apply_fps:
             inputs["fps"] = float(fps)
 
         if class_type == "LoadImage":
@@ -702,6 +725,50 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
 
         if class_type == "LTXVImgToVideoInplace" and image_strength is not None:
             inputs["strength"] = float(image_strength)
+
+        if class_type == "LTXVSampler":
+            if steps is not None:
+                inputs["steps"] = int(steps)
+            if cfg is not None:
+                inputs["cfg"] = float(cfg)
+            if seed is not None:
+                inputs["seed"] = int(seed)
+
+        if class_type == "LTXVAudioGenerate" and prompt is not None:
+            inputs["prompt"] = prompt
+
+    if negative_prompt is not None and clip_nodes and conditioning_nodes:
+        existing_ids = [int(key) for key in workflow.keys() if str(key).isdigit()]
+        next_id = max(existing_ids or [0]) + 1
+        negative_clip_id = None
+        for conditioning in conditioning_nodes:
+            inputs = conditioning.get("inputs", {})
+            negative_ref = inputs.get("negative")
+            positive_ref = inputs.get("positive")
+            neg_id = None
+            pos_id = None
+            if isinstance(negative_ref, list) and negative_ref:
+                neg_id = str(negative_ref[0])
+            if isinstance(positive_ref, list) and positive_ref:
+                pos_id = str(positive_ref[0])
+
+            if neg_id and neg_id in clip_nodes and neg_id != pos_id:
+                clip_nodes[neg_id]["inputs"]["text"] = negative_prompt
+                continue
+
+            if pos_id and pos_id in clip_nodes:
+                if negative_clip_id is None:
+                    base_inputs = clip_nodes[pos_id].get("inputs", {})
+                    workflow[str(next_id)] = {
+                        "class_type": "CLIPTextEncode",
+                        "inputs": {
+                            "clip": base_inputs.get("clip"),
+                            "text": negative_prompt,
+                        },
+                    }
+                    negative_clip_id = str(next_id)
+                    next_id += 1
+                inputs["negative"] = [negative_clip_id, 0]
 
     if has_load_image and not input_image:
         raise ValueError("input_image is required for image-to-video workflows")
@@ -917,7 +984,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 workflow = load_workflow_template(str(workflow_input))
 
             # Optionally update workflow inputs if provided
-            if any(k in job_input for k in ["prompt", "width", "height", "num_frames", "fps", "steps", "cfg_scale", "seed"]):
+            if any(k in job_input for k in ["prompt", "negative_prompt", "width", "height", "num_frames", "fps", "steps", "cfg_scale", "seed", "duration_seconds", "input_image", "input_image_url", "image", "image_url", "image_strength", "model"]):
                 workflow = update_workflow_inputs(workflow, job_input)
 
             # Ensure required models exist before sending to ComfyUI
