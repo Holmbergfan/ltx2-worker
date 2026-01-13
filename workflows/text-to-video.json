@@ -177,7 +177,7 @@
           "5",
           1
         ],
-        "cfg": 1.0
+        "cfg": 4.0
       }
     },
     "19": {
@@ -266,7 +266,7 @@
       "class_type": "CFGGuider",
       "inputs": {
         "model": [
-          "7",
+          "6",
           0
         ],
         "positive": [
