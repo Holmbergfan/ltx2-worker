@@ -1386,6 +1386,9 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         if class_type == "LTXVConditioning" and apply_fps:
             inputs["frame_rate"] = float(fps)
 
+        if class_type == "LTXVScheduler" and steps is not None:
+            inputs["steps"] = int(steps)
+
         if class_type == "EmptyImage":
             if width is not None:
                 inputs["width"] = int(width)

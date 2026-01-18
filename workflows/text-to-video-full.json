@@ -1,0 +1,385 @@
+{
+  "name": "LTX-2 Text-to-Video (Full)",
+  "description": "LTX-2 full text-to-video workflow using Gemma encoder and two-stage sampling.",
+  "version": "1.0.0",
+  "workflow": {
+    "1": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {
+        "ckpt_name": "ltx-2-19b-dev-fp8.safetensors"
+      }
+    },
+    "2": {
+      "class_type": "LTXVAudioVAELoader",
+      "inputs": {
+        "ckpt_name": "ltx-2-19b-dev-fp8.safetensors"
+      }
+    },
+    "3": {
+      "class_type": "LTXVGemmaCLIPModelLoader",
+      "inputs": {
+        "gemma_path": "gemma-3-12b-it-qat-q4_0-unquantized/model-00001-of-00005.safetensors",
+        "ltxv_path": "ltx-2-19b-dev-fp8.safetensors",
+        "max_length": 1024
+      }
+    },
+    "4": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          "3",
+          0
+        ],
+        "text": "A cinematic shot of a mountain ridge at sunrise, slow push-in, soft wind ambience"
+      }
+    },
+    "5": {
+      "class_type": "LTXVConditioning",
+      "inputs": {
+        "positive": [
+          "4",
+          0
+        ],
+        "negative": [
+          "4",
+          0
+        ],
+        "frame_rate": 25
+      }
+    },
+    "6": {
+      "class_type": "LoraLoaderModelOnly",
+      "inputs": {
+        "model": [
+          "1",
+          0
+        ],
+        "lora_name": "ltx-2-19b-distilled-lora-384.safetensors",
+        "strength_model": 0.0
+      }
+    },
+    "7": {
+      "class_type": "LoraLoaderModelOnly",
+      "inputs": {
+        "model": [
+          "1",
+          0
+        ],
+        "lora_name": "ltx-2-19b-distilled-lora-384.safetensors",
+        "strength_model": 0.0
+      }
+    },
+    "8": {
+      "class_type": "LatentUpscaleModelLoader",
+      "inputs": {
+        "model_name": "ltx-2-spatial-upscaler-x2-1.0.safetensors"
+      }
+    },
+    "9": {
+      "class_type": "EmptyImage",
+      "inputs": {
+        "width": 1920,
+        "height": 1088,
+        "batch_size": 1,
+        "color": 0
+      }
+    },
+    "10": {
+      "class_type": "ImageScaleBy",
+      "inputs": {
+        "image": [
+          "9",
+          0
+        ],
+        "upscale_method": "nearest-exact",
+        "scale_by": 0.5
+      }
+    },
+    "11": {
+      "class_type": "GetImageSize",
+      "inputs": {
+        "image": [
+          "10",
+          0
+        ]
+      }
+    },
+    "12": {
+      "class_type": "EmptyLTXVLatentVideo",
+      "inputs": {
+        "width": [
+          "11",
+          0
+        ],
+        "height": [
+          "11",
+          1
+        ],
+        "length": 121,
+        "batch_size": 1
+      }
+    },
+    "13": {
+      "class_type": "LTXVEmptyLatentAudio",
+      "inputs": {
+        "frames_number": 121,
+        "frame_rate": 25,
+        "batch_size": 1,
+        "audio_vae": [
+          "2",
+          0
+        ]
+      }
+    },
+    "14": {
+      "class_type": "LTXVConcatAVLatent",
+      "inputs": {
+        "video_latent": [
+          "12",
+          0
+        ],
+        "audio_latent": [
+          "13",
+          0
+        ]
+      }
+    },
+    "15": {
+      "class_type": "RandomNoise",
+      "inputs": {
+        "noise_seed": 45
+      }
+    },
+    "16": {
+      "class_type": "KSamplerSelect",
+      "inputs": {
+        "sampler_name": "euler"
+      }
+    },
+    "17": {
+      "class_type": "LTXVScheduler",
+      "inputs": {
+        "steps": 25,
+        "max_shift": 2.05,
+        "base_shift": 0.95,
+        "stretch": true,
+        "terminal": 0.1,
+        "latent": [
+          "14",
+          0
+        ]
+      }
+    },
+    "18": {
+      "class_type": "CFGGuider",
+      "inputs": {
+        "model": [
+          "6",
+          0
+        ],
+        "positive": [
+          "5",
+          0
+        ],
+        "negative": [
+          "5",
+          1
+        ],
+        "cfg": 4.0
+      }
+    },
+    "19": {
+      "class_type": "SamplerCustomAdvanced",
+      "inputs": {
+        "noise": [
+          "15",
+          0
+        ],
+        "guider": [
+          "18",
+          0
+        ],
+        "sampler": [
+          "16",
+          0
+        ],
+        "sigmas": [
+          "17",
+          0
+        ],
+        "latent_image": [
+          "14",
+          0
+        ]
+      }
+    },
+    "20": {
+      "class_type": "LTXVSeparateAVLatent",
+      "inputs": {
+        "av_latent": [
+          "19",
+          1
+        ]
+      }
+    },
+    "21": {
+      "class_type": "LTXVLatentUpsampler",
+      "inputs": {
+        "samples": [
+          "20",
+          0
+        ],
+        "upscale_model": [
+          "8",
+          0
+        ],
+        "vae": [
+          "1",
+          2
+        ]
+      }
+    },
+    "22": {
+      "class_type": "LTXVConcatAVLatent",
+      "inputs": {
+        "video_latent": [
+          "21",
+          0
+        ],
+        "audio_latent": [
+          "20",
+          1
+        ]
+      }
+    },
+    "23": {
+      "class_type": "RandomNoise",
+      "inputs": {
+        "noise_seed": 420
+      }
+    },
+    "24": {
+      "class_type": "KSamplerSelect",
+      "inputs": {
+        "sampler_name": "euler"
+      }
+    },
+    "25": {
+      "class_type": "ManualSigmas",
+      "inputs": {
+        "sigmas": "0.909375, 0.725, 0.421875, 0.0"
+      }
+    },
+    "26": {
+      "class_type": "CFGGuider",
+      "inputs": {
+        "model": [
+          "6",
+          0
+        ],
+        "positive": [
+          "5",
+          0
+        ],
+        "negative": [
+          "5",
+          1
+        ],
+        "cfg": 1.0
+      }
+    },
+    "27": {
+      "class_type": "SamplerCustomAdvanced",
+      "inputs": {
+        "noise": [
+          "23",
+          0
+        ],
+        "guider": [
+          "26",
+          0
+        ],
+        "sampler": [
+          "24",
+          0
+        ],
+        "sigmas": [
+          "25",
+          0
+        ],
+        "latent_image": [
+          "22",
+          0
+        ]
+      }
+    },
+    "28": {
+      "class_type": "LTXVSeparateAVLatent",
+      "inputs": {
+        "av_latent": [
+          "27",
+          1
+        ]
+      }
+    },
+    "29": {
+      "class_type": "LTXVSpatioTemporalTiledVAEDecode",
+      "inputs": {
+        "vae": [
+          "1",
+          2
+        ],
+        "latents": [
+          "28",
+          0
+        ],
+        "spatial_tiles": 4,
+        "spatial_overlap": 4,
+        "temporal_tile_length": 16,
+        "temporal_overlap": 4,
+        "last_frame_fix": false,
+        "working_device": "auto",
+        "working_dtype": "auto"
+      }
+    },
+    "30": {
+      "class_type": "LTXVAudioVAEDecode",
+      "inputs": {
+        "samples": [
+          "28",
+          1
+        ],
+        "audio_vae": [
+          "2",
+          0
+        ]
+      }
+    },
+    "31": {
+      "class_type": "CreateVideo",
+      "inputs": {
+        "images": [
+          "29",
+          0
+        ],
+        "fps": 24,
+        "audio": [
+          "30",
+          0
+        ]
+      }
+    },
+    "32": {
+      "class_type": "SaveVideo",
+      "inputs": {
+        "video": [
+          "31",
+          0
+        ],
+        "filename_prefix": "video/LTX-2",
+        "format": "auto",
+        "codec": "auto"
+      }
+    }
+  }
+}
