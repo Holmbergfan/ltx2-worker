@@ -25,10 +25,32 @@ from typing import Dict, Any, List, Optional
 import runpod
 import boto3
 import requests
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import hf_hub_download, snapshot_download, list_repo_files
 
 # Enable fast HF downloads (must be set before any HF calls)
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+
+# Logging configuration
+LOG_LEVEL = os.environ.get("LTX2_LOG_LEVEL", "INFO").upper()
+LOG_LEVELS = {
+    "DEBUG": 10,
+    "INFO": 20,
+    "WARN": 30,
+    "WARNING": 30,
+    "ERROR": 40,
+}
+LOG_LEVEL_NUM = LOG_LEVELS.get(LOG_LEVEL, 20)
+LOG_VERBOSE = LOG_LEVEL_NUM <= LOG_LEVELS["DEBUG"]
+STATUS_LOG_INTERVAL = int(os.environ.get("LTX2_STATUS_LOG_INTERVAL", "60"))
+
+if not LOG_VERBOSE:
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
+
+def log(message: str, level: str = "INFO") -> None:
+    level_upper = level.upper()
+    if LOG_LEVELS.get(level_upper, 20) >= LOG_LEVEL_NUM:
+        print(f"[LTX2] {level_upper}: {message}")
 
 # =============================================================================
 # Configuration
@@ -56,7 +78,7 @@ AUTO_SEED = os.getenv("AUTO_SEED", "true").lower() == "true"
 # Only fall back to /workspace if /runpod-volume is NOT available at all
 if not os.path.ismount("/runpod-volume") and not os.path.exists("/runpod-volume"):
     if os.path.ismount("/workspace") or os.path.exists("/workspace"):
-        print("Warning: /runpod-volume not available, falling back to /workspace.")
+        log("Warning: /runpod-volume not available, falling back to /workspace.", level="WARN")
         MODEL_DIR = "/workspace/models"
         COMFY_HOME = "/workspace/ComfyUI"
         TMPDIR = "/workspace/tmp"
@@ -69,12 +91,45 @@ os.makedirs(TMPDIR, exist_ok=True)
 def log_disk_usage(path: str):
     try:
         total, used, free = shutil.disk_usage(path)
-        print(
+        log(
             "Disk usage for %s: total=%.1fGB used=%.1fGB free=%.1fGB"
-            % (path, total / (1024**3), used / (1024**3), free / (1024**3))
+            % (path, total / (1024**3), used / (1024**3), free / (1024**3)),
+            level="DEBUG"
         )
     except FileNotFoundError:
-        print(f"Disk usage for {path}: path not found")
+        log(f"Disk usage for {path}: path not found", level="DEBUG")
+
+
+def run_cmd(cmd: List[str], desc: str, timeout: Optional[int] = None, check: bool = True, quiet: Optional[bool] = None, cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None) -> subprocess.CompletedProcess:
+    if quiet is None:
+        quiet = not LOG_VERBOSE
+    if quiet:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+            env=env,
+        )
+    else:
+        result = subprocess.run(
+            cmd,
+            timeout=timeout,
+            cwd=cwd,
+            env=env,
+        )
+    if result.returncode != 0:
+        message = f"{desc} failed (exit {result.returncode})"
+        if quiet and result.stdout:
+            tail = result.stdout.strip().splitlines()[-6:]
+            if tail:
+                message = f"{message}: {' | '.join(tail)}"
+        log(message, level="ERROR" if check else "WARN")
+        if check:
+            raise RuntimeError(message)
+    return result
 
 
 def _sanitize_log_value(value, max_len: int = 800):
@@ -93,12 +148,14 @@ def _sanitize_log_value(value, max_len: int = 800):
     return value
 
 
-def _log_ltx2_event(label: str, payload: Any) -> None:
+def _log_ltx2_event(label: str, payload: Any, level: str = "DEBUG") -> None:
+    if LOG_LEVELS.get(level.upper(), 20) < LOG_LEVEL_NUM:
+        return
     try:
         sanitized = _sanitize_log_value(payload)
-        print(f"[LTX2] {label}: {json.dumps(sanitized, ensure_ascii=True)}")
+        log(f"{label}: {json.dumps(sanitized, ensure_ascii=True)}", level=level)
     except Exception as exc:
-        print(f"[LTX2] {label}: <log failed: {exc}>")
+        log(f"{label}: <log failed: {exc}>", level="WARN")
 
 
 def _summarize_workflow(workflow: Dict[str, Any]) -> Dict[str, Any]:
@@ -205,11 +262,152 @@ def _summarize_workflow(workflow: Dict[str, Any]) -> Dict[str, Any]:
         summary["image_strengths"] = image_strengths
 
     return summary
-print(f"Using storage root: {DEFAULT_ROOT}")
-print(f"MODEL_DIR={MODEL_DIR}")
-print(f"COMFY_HOME={COMFY_HOME}")
-print(f"TMPDIR={TMPDIR}")
-print(f"AUTO_SEED={AUTO_SEED}")
+
+
+def _range_or_value(values: List[Any]) -> Optional[str]:
+    if not values:
+        return None
+    try:
+        unique = sorted(set(values))
+        if len(unique) == 1:
+            return str(unique[0])
+        return f"{unique[0]}-{unique[-1]}"
+    except Exception:
+        return str(values[0])
+
+
+def _count_and_max_len(values: List[str]) -> Optional[str]:
+    if not values:
+        return None
+    lengths = [len(v) for v in values if isinstance(v, str)]
+    if not lengths:
+        return str(len(values))
+    return f"{len(lengths)} (max {max(lengths)} chars)"
+
+
+def summarize_job_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
+    prompt = job_input.get("prompt") or ""
+    negative_prompt = job_input.get("negative_prompt") or ""
+    input_image = (
+        job_input.get("input_image")
+        or job_input.get("input_image_url")
+        or job_input.get("image")
+        or job_input.get("image_url")
+    )
+    input_images = _coerce_image_list(job_input.get("input_images"))
+    input_keyframes = _coerce_keyframes(
+        job_input.get("input_keyframes")
+        or job_input.get("input_keyframe_indices")
+    )
+    input_label = None
+    if isinstance(input_image, str) and input_image:
+        input_label = "inline" if input_image.startswith("data:") else "url"
+    if input_images:
+        input_label = f"{len(input_images)} refs"
+
+    width = job_input.get("width")
+    height = job_input.get("height")
+    size = f"{width}x{height}" if width and height else None
+    workflow_value = job_input.get("workflow")
+    workflow_label = None
+    if isinstance(workflow_value, dict):
+        workflow_label = "<inline>"
+    elif workflow_value:
+        workflow_label = str(workflow_value)
+
+    return {
+        "action": job_input.get("action", "generate"),
+        "workflow": workflow_label,
+        "model": job_input.get("model"),
+        "size": size,
+        "frames": job_input.get("num_frames"),
+        "fps": job_input.get("fps"),
+        "steps": job_input.get("steps"),
+        "cfg": job_input.get("cfg_scale"),
+        "seed": job_input.get("seed"),
+        "image_strength": job_input.get("image_strength"),
+        "prompt_len": len(prompt) if prompt else 0,
+        "negative_len": len(negative_prompt) if negative_prompt else 0,
+        "input_image": input_label,
+        "keyframes": len(input_keyframes) if input_keyframes else None,
+    }
+
+
+def log_job_summary(job_input: Dict[str, Any]) -> None:
+    summary = summarize_job_input(job_input)
+    parts = []
+    for key in ("action", "workflow", "model"):
+        if summary.get(key):
+            parts.append(f"{key}={summary[key]}")
+    if summary.get("size"):
+        parts.append(f"size={summary['size']}")
+    if summary.get("frames") is not None:
+        parts.append(f"frames={summary['frames']}")
+    if summary.get("fps") is not None:
+        parts.append(f"fps={summary['fps']}")
+    if summary.get("steps") is not None:
+        parts.append(f"steps={summary['steps']}")
+    if summary.get("cfg") is not None:
+        parts.append(f"cfg={summary['cfg']}")
+    if summary.get("image_strength") is not None:
+        parts.append(f"image_strength={summary['image_strength']}")
+    if summary.get("seed") is not None:
+        parts.append(f"seed={summary['seed']}")
+    if summary.get("input_image"):
+        parts.append(f"input_image={summary['input_image']}")
+    if summary.get("keyframes") is not None:
+        parts.append(f"keyframes={summary['keyframes']}")
+    if summary.get("prompt_len"):
+        parts.append(f"prompt_len={summary['prompt_len']}")
+    if summary.get("negative_len"):
+        parts.append(f"negative_len={summary['negative_len']}")
+
+    if parts:
+        log("Job " + " | ".join(parts), level="INFO")
+
+
+def log_workflow_summary(summary: Dict[str, Any]) -> None:
+    parts = [f"nodes={summary.get('node_count', 0)}"]
+    sizes = summary.get("sizes") or []
+    if sizes and isinstance(sizes[0], dict):
+        width = sizes[0].get("width")
+        height = sizes[0].get("height")
+        if width and height:
+            size_label = f"{width}x{height}"
+            if len(sizes) > 1:
+                size_label = f"{size_label} (+{len(sizes) - 1})"
+            parts.append(f"size={size_label}")
+    frames = _range_or_value(summary.get("lengths", []))
+    if frames:
+        parts.append(f"frames={frames}")
+    fps = _range_or_value(summary.get("fps", []))
+    if fps:
+        parts.append(f"fps={fps}")
+    cfg = _range_or_value(summary.get("cfg", []))
+    if cfg:
+        parts.append(f"cfg={cfg}")
+    strengths = _range_or_value(summary.get("image_strengths", []))
+    if strengths:
+        parts.append(f"image_strength={strengths}")
+    prompts = _count_and_max_len(summary.get("clip_texts", []) + summary.get("ltxv_prompts", []))
+    if prompts:
+        parts.append(f"prompts={prompts}")
+    negatives = _count_and_max_len(summary.get("ltxv_negative_prompts", []))
+    if negatives:
+        parts.append(f"negatives={negatives}")
+    input_images = summary.get("input_images") or []
+    if input_images:
+        parts.append(f"input_images={len(input_images)}")
+    if summary.get("seed_source"):
+        parts.append(f"seed_source={summary['seed_source']}")
+    if summary.get("updated"):
+        parts.append("updated_inputs=yes")
+
+    log("Workflow " + " | ".join(parts), level="INFO")
+log(
+    f"Storage root={DEFAULT_ROOT} | MODEL_DIR={MODEL_DIR} | COMFY_HOME={COMFY_HOME} | TMPDIR={TMPDIR} | AUTO_SEED={AUTO_SEED}",
+    level="INFO"
+)
 log_disk_usage("/workspace")
 log_disk_usage("/runpod-volume")
 COMFY_HOST = os.environ.get("COMFY_HOST", "127.0.0.1")
@@ -231,7 +429,29 @@ LTX2_MODEL_FILENAME = os.environ.get("LTX2_MODEL_FILENAME", "ltx-2-19b-distilled
 LTX2_FULL_MODEL_FILENAME = os.environ.get("LTX2_FULL_MODEL_FILENAME", "ltx-2-19b-dev-fp8.safetensors")
 GEMMA_REPO = os.environ.get("GEMMA_REPO", "google/gemma-3-12b-it-qat-q4_0-unquantized")
 GEMMA_DIRNAME = os.environ.get("GEMMA_DIRNAME", "gemma-3-12b-it-qat-q4_0-unquantized")
-PRELOAD_MODELS = os.environ.get("PRELOAD_MODELS", "").lower() in ("1", "true", "yes")
+PRELOAD_MODELS = os.environ.get("PRELOAD_MODELS", "true").lower() in ("1", "true", "yes")
+LTX2_DOWNLOAD_ALL = os.environ.get("LTX2_DOWNLOAD_ALL", "true").lower() in ("1", "true", "yes")
+
+LTX2_README_FILES = [
+    "ltx-2-19b-dev-fp8.safetensors",
+    "ltx-2-19b-dev.safetensors",
+    "ltx-2-19b-distilled.safetensors",
+    "ltx-2-19b-distilled-fp8.safetensors",
+    "ltx-2-spatial-upscaler-x2-1.0.safetensors",
+    "ltx-2-temporal-upscaler-x2-1.0.safetensors",
+    "ltx-2-19b-distilled-lora-384.safetensors",
+    "ltx-2-19b-IC-LoRA-Canny-Control.safetensors",
+    "ltx-2-19b-IC-LoRA-Depth-Control.safetensors",
+    "ltx-2-19b-IC-LoRA-Detailer.safetensors",
+    "ltx-2-19b-IC-LoRA-Pose-Control.safetensors",
+    "ltx-2-19b-LoRA-Camera-Control-Dolly-In.safetensors",
+    "ltx-2-19b-LoRA-Camera-Control-Dolly-Left.safetensors",
+    "ltx-2-19b-LoRA-Camera-Control-Dolly-Out.safetensors",
+    "ltx-2-19b-LoRA-Camera-Control-Dolly-Right.safetensors",
+    "ltx-2-19b-LoRA-Camera-Control-Jib-Down.safetensors",
+    "ltx-2-19b-LoRA-Camera-Control-Jib-Up.safetensors",
+    "ltx-2-19b-LoRA-Camera-Control-Static.safetensors",
+]
 
 # S3 Storage
 S3_BUCKET = os.environ.get("S3_BUCKET", "ltx2-models")
@@ -243,6 +463,7 @@ PRESIGNED_URL_EXPIRY = int(os.environ.get("PRESIGNED_URL_EXPIRY", 14400))
 
 COMFY_PROCESS = None
 COMFY_RESTART_REQUIRED = False
+LTX2_ALL_DOWNLOAD_ATTEMPTED = False
 
 # =============================================================================
 # Setup Functions - Download at Runtime to Network Volume
@@ -262,7 +483,7 @@ def ensure_directories():
     ]
     for d in dirs:
         os.makedirs(d, exist_ok=True)
-    print(f"Directories ready in {MODEL_DIR}")
+    log(f"Directories ready in {MODEL_DIR}", level="DEBUG")
 
 def ensure_comfy_model_links():
     """Expose MODEL_DIR to ComfyUI models directory"""
@@ -276,17 +497,17 @@ def ensure_comfy_model_links():
             os.unlink(comfy_models)
             COMFY_RESTART_REQUIRED = True
         except OSError as e:
-            print(f"Failed to remove models symlink ({e}); leaving as-is.")
+            log(f"Failed to remove models symlink ({e}); leaving as-is.", level="WARN")
             return
 
     if not os.path.exists(comfy_models):
         os.makedirs(os.path.dirname(comfy_models), exist_ok=True)
         try:
             os.symlink(MODEL_DIR, comfy_models)
-            print(f"Linked ComfyUI models -> {MODEL_DIR}")
+            log(f"Linked ComfyUI models -> {MODEL_DIR}", level="DEBUG")
             return
         except OSError as e:
-            print(f"Symlink to models failed ({e}), falling back to subdir links...")
+            log(f"Symlink to models failed ({e}), falling back to subdir links...", level="WARN")
 
     # If models dir exists, link subfolders to keep ComfyUI happy
     os.makedirs(comfy_models, exist_ok=True)
@@ -298,7 +519,7 @@ def ensure_comfy_model_links():
         try:
             os.symlink(src, dst)
         except OSError as e:
-            print(f"Symlink for {subdir} failed: {e}")
+            log(f"Symlink for {subdir} failed: {e}", level="WARN")
 
     # Ensure ComfyUI picks up MODEL_DIR even if models/ exists without symlinks.
     extra_paths_path = Path(COMFY_HOME) / "extra_model_paths.yaml"
@@ -325,10 +546,13 @@ def install_comfyui_deps():
     """Ensure ComfyUI dependencies are installed"""
     req_file = f"{COMFY_HOME}/requirements.txt"
     if os.path.exists(req_file):
-        print("Installing/updating ComfyUI dependencies...")
-        subprocess.run([
-            "pip", "install", "--no-cache-dir", "-q", "-r", req_file
-        ], check=False, timeout=300)
+        log("Installing/updating ComfyUI dependencies...", level="INFO")
+        run_cmd(
+            ["pip", "install", "--no-cache-dir", "-q", "--root-user-action=ignore", "--disable-pip-version-check", "-r", req_file],
+            desc="ComfyUI deps install",
+            timeout=300,
+            check=False,
+        )
 
 def ensure_custom_nodes():
     """Ensure LTX-Video custom nodes are installed"""
@@ -340,91 +564,131 @@ def ensure_custom_nodes():
 
     # Install LTX-Video nodes if missing
     if not os.path.exists(f"{ltxv_path}/nodes.py"):
-        print("Installing ComfyUI-LTXVideo custom nodes...")
+        log("Installing ComfyUI-LTXVideo custom nodes...", level="INFO")
         import shutil
         shutil.rmtree(ltxv_path, ignore_errors=True)
-        subprocess.run([
+        clone_cmd = [
             "git", "clone", "--depth", "1",
             "https://github.com/Lightricks/ComfyUI-LTXVideo.git",
             ltxv_path
-        ], check=True, timeout=120)
+        ]
+        if not LOG_VERBOSE:
+            clone_cmd.insert(2, "--quiet")
+        run_cmd(clone_cmd, desc="Clone ComfyUI-LTXVideo", timeout=120, check=True)
         req = f"{ltxv_path}/requirements.txt"
         if os.path.exists(req):
-            subprocess.run(["pip", "install", "--no-cache-dir", "-q", "-r", req], check=False, timeout=300)
-        print("ComfyUI-LTXVideo installed!")
+            run_cmd(
+                ["pip", "install", "--no-cache-dir", "-q", "--root-user-action=ignore", "--disable-pip-version-check", "-r", req],
+                desc="ComfyUI-LTXVideo deps",
+                timeout=300,
+                check=False,
+            )
+        log("ComfyUI-LTXVideo installed!", level="INFO")
 
     # Install VideoHelperSuite if missing
     if not os.path.exists(f"{vhs_path}/__init__.py"):
-        print("Installing ComfyUI-VideoHelperSuite...")
+        log("Installing ComfyUI-VideoHelperSuite...", level="INFO")
         import shutil
         shutil.rmtree(vhs_path, ignore_errors=True)
-        subprocess.run([
+        clone_cmd = [
             "git", "clone", "--depth", "1",
             "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
             vhs_path
-        ], check=True, timeout=120)
+        ]
+        if not LOG_VERBOSE:
+            clone_cmd.insert(2, "--quiet")
+        run_cmd(clone_cmd, desc="Clone ComfyUI-VideoHelperSuite", timeout=120, check=True)
         req = f"{vhs_path}/requirements.txt"
         if os.path.exists(req):
-            subprocess.run(["pip", "install", "--no-cache-dir", "-q", "-r", req], check=False, timeout=300)
-        print("ComfyUI-VideoHelperSuite installed!")
+            run_cmd(
+                ["pip", "install", "--no-cache-dir", "-q", "--root-user-action=ignore", "--disable-pip-version-check", "-r", req],
+                desc="ComfyUI-VideoHelperSuite deps",
+                timeout=300,
+                check=False,
+            )
+        log("ComfyUI-VideoHelperSuite installed!", level="INFO")
 
 def install_comfyui(force_reinstall: bool = False):
     """Install ComfyUI to network volume if not present"""
     if force_reinstall and os.path.exists(COMFY_HOME):
-        print("Force reinstalling ComfyUI...")
+        log("Force reinstalling ComfyUI...", level="WARN")
         import shutil
         shutil.rmtree(COMFY_HOME, ignore_errors=True)
 
     if os.path.exists(f"{COMFY_HOME}/main.py"):
-        print("ComfyUI already installed on network volume")
+        log("ComfyUI already installed on network volume", level="DEBUG")
         # Always ensure deps are up to date
         install_comfyui_deps()
         return True
 
-    print("Installing ComfyUI to network volume...")
+    log("Installing ComfyUI to network volume...", level="INFO")
     try:
-        subprocess.run([
+        clone_cmd = [
             "git", "clone", "--depth", "1",
             "https://github.com/comfyanonymous/ComfyUI.git",
             COMFY_HOME
-        ], check=True, timeout=300)
+        ]
+        if not LOG_VERBOSE:
+            clone_cmd.insert(2, "--quiet")
+        run_cmd(clone_cmd, desc="Clone ComfyUI", timeout=300, check=True)
 
-        subprocess.run([
-            "pip", "install", "--no-cache-dir", "-r",
-            f"{COMFY_HOME}/requirements.txt"
-        ], check=True, timeout=600)
+        run_cmd(
+            ["pip", "install", "--no-cache-dir", "--root-user-action=ignore", "--disable-pip-version-check", "-r", f"{COMFY_HOME}/requirements.txt"],
+            desc="ComfyUI requirements install",
+            timeout=600,
+            check=True,
+        )
 
         # Install LTX-Video nodes
         custom_nodes = f"{COMFY_HOME}/custom_nodes"
         os.makedirs(custom_nodes, exist_ok=True)
 
-        subprocess.run([
-            "git", "clone", "--depth", "1",
-            "https://github.com/Lightricks/ComfyUI-LTXVideo.git",
-            f"{custom_nodes}/ComfyUI-LTXVideo"
-        ], check=True, timeout=120)
+        ltxv_path = f"{custom_nodes}/ComfyUI-LTXVideo"
+        if not os.path.exists(f"{ltxv_path}/nodes.py"):
+            import shutil
+            shutil.rmtree(ltxv_path, ignore_errors=True)
+            clone_cmd = [
+                "git", "clone", "--depth", "1",
+                "https://github.com/Lightricks/ComfyUI-LTXVideo.git",
+                ltxv_path
+            ]
+            if not LOG_VERBOSE:
+                clone_cmd.insert(2, "--quiet")
+            run_cmd(clone_cmd, desc="Clone ComfyUI-LTXVideo", timeout=120, check=True)
+        else:
+            log("ComfyUI-LTXVideo already installed, skipping clone", level="INFO")
 
-        subprocess.run([
-            "git", "clone", "--depth", "1",
-            "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
-            f"{custom_nodes}/ComfyUI-VideoHelperSuite"
-        ], check=True, timeout=120)
+        vhs_path = f"{custom_nodes}/ComfyUI-VideoHelperSuite"
+        if not os.path.exists(f"{vhs_path}/videohelpersuite"):
+            import shutil
+            shutil.rmtree(vhs_path, ignore_errors=True)
+            clone_cmd = [
+                "git", "clone", "--depth", "1",
+                "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
+                vhs_path
+            ]
+            if not LOG_VERBOSE:
+                clone_cmd.insert(2, "--quiet")
+            run_cmd(clone_cmd, desc="Clone ComfyUI-VideoHelperSuite", timeout=120, check=True)
+        else:
+            log("ComfyUI-VideoHelperSuite already installed, skipping clone", level="INFO")
 
         for req in [
             f"{custom_nodes}/ComfyUI-LTXVideo/requirements.txt",
             f"{custom_nodes}/ComfyUI-VideoHelperSuite/requirements.txt",
         ]:
             if os.path.exists(req):
-                subprocess.run(
-                    ["pip", "install", "--no-cache-dir", "-r", req],
-                    check=True,
+                run_cmd(
+                    ["pip", "install", "--no-cache-dir", "--root-user-action=ignore", "--disable-pip-version-check", "-r", req],
+                    desc=f"Install {Path(req).parent.name} requirements",
                     timeout=600,
+                    check=True,
                 )
 
-        print("ComfyUI installed!")
+        log("ComfyUI installed!", level="INFO")
         return True
     except Exception as e:
-        print(f"ComfyUI install error: {e}")
+        log(f"ComfyUI install error: {e}", level="ERROR")
         return False
 
 def fast_download(url: str, output_path: str, token: str = None):
@@ -441,8 +705,8 @@ def fast_download(url: str, output_path: str, token: str = None):
         *headers,
         url
     ]
-    print(f"Downloading with aria2c (16 connections): {os.path.basename(output_path)}")
-    subprocess.run(cmd, check=True)
+    log(f"Downloading with aria2c: {os.path.basename(output_path)}", level="INFO")
+    run_cmd(cmd, desc="aria2c download", check=True)
 
 def download_hf_file(repo_id: str, filename: str, dest_dir: str, token: str = None):
     """Download a single file from Hugging Face into dest_dir."""
@@ -457,7 +721,7 @@ def download_hf_file(repo_id: str, filename: str, dest_dir: str, token: str = No
         url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
         fast_download(url, str(dest_path), token)
     except Exception as e:
-        print(f"aria2c failed ({e}), falling back to hf_hub_download...")
+        log(f"aria2c failed ({e}), falling back to hf_hub_download...", level="WARN")
         hf_hub_download(
             repo_id=repo_id,
             filename=filename,
@@ -473,7 +737,7 @@ def download_gemma_text_encoder(token: str = None):
     if required_file.exists():
         return False
 
-    print(f"Downloading Gemma text encoder ({GEMMA_REPO})...")
+    log(f"Downloading Gemma text encoder ({GEMMA_REPO})...", level="INFO")
     gemma_root.mkdir(parents=True, exist_ok=True)
     snapshot_download(
         repo_id=GEMMA_REPO,
@@ -481,11 +745,99 @@ def download_gemma_text_encoder(token: str = None):
         token=token or None,
         local_dir_use_symlinks=False,
     )
-    print("Gemma text encoder downloaded!")
+    log("Gemma text encoder downloaded!", level="INFO")
     return True
+
+def _classify_ltx2_asset(filename: str) -> str:
+    lower = filename.lower()
+    if "upscaler" in lower:
+        return f"{MODEL_DIR}/latent_upscale_models"
+    if "lora" in lower:
+        return f"{MODEL_DIR}/loras"
+    return f"{MODEL_DIR}/checkpoints"
+
+def _download_repo_asset(repo_id: str, repo_path: str, dest_dir: str, token: str = None, force: bool = False) -> bool:
+    dest_path = Path(dest_dir) / os.path.basename(repo_path)
+    if dest_path.exists() and not force:
+        return False
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        url = f"https://huggingface.co/{repo_id}/resolve/main/{repo_path}"
+        fast_download(url, str(dest_path), token)
+    except Exception as e:
+        log(f"aria2c failed ({e}), falling back to hf_hub_download...", level="WARN")
+        try:
+            local_path = hf_hub_download(
+                repo_id=repo_id,
+                filename=repo_path,
+                token=token or None,
+            )
+            shutil.copyfile(local_path, dest_path)
+        except Exception as e2:
+            log(f"hf_hub_download failed for {repo_path}: {e2}", level="WARN")
+            return False
+    return True
+
+def download_all_ltx2_assets(force: bool = False) -> bool:
+    """Download every LTX-2 safetensors asset from the repo + README list."""
+    global LTX2_ALL_DOWNLOAD_ATTEMPTED
+    if LTX2_ALL_DOWNLOAD_ATTEMPTED and not force:
+        return False
+
+    repo_files: List[str] = []
+    try:
+        repo_files = list_repo_files(LTX2_MODEL_REPO, token=HF_TOKEN or None)
+    except Exception as e:
+        log(f"Failed to list LTX-2 repo files ({e}); falling back to README list.", level="WARN")
+
+    paths_by_base: Dict[str, List[str]] = {}
+    paths_by_base_lower: Dict[str, List[str]] = {}
+    for path in repo_files:
+        base = os.path.basename(path)
+        paths_by_base.setdefault(base, []).append(path)
+        paths_by_base_lower.setdefault(base.lower(), []).append(path)
+
+    candidates = set(LTX2_README_FILES)
+    for path in repo_files:
+        base = os.path.basename(path)
+        lower = base.lower()
+        if lower.endswith(".safetensors") and lower.startswith("ltx-2-"):
+            candidates.add(base)
+
+    downloaded_any = False
+    failed = 0
+    total = 0
+
+    for base in sorted(candidates):
+        if not base.lower().endswith(".safetensors"):
+            continue
+        total += 1
+        dest_dir = _classify_ltx2_asset(base)
+        possible_paths = paths_by_base.get(base) or paths_by_base_lower.get(base.lower()) or [base]
+        success = False
+        for repo_path in possible_paths:
+            if _download_repo_asset(LTX2_MODEL_REPO, repo_path, dest_dir, HF_TOKEN, force=force):
+                downloaded_any = True
+                success = True
+                break
+        if not success:
+            failed += 1
+            log(f"Failed to download {base}", level="WARN")
+
+    if failed:
+        log(f"LTX-2 full download: {total - failed}/{total} assets ready (failed {failed})", level="WARN")
+    else:
+        log(f"LTX-2 full download: {total} assets ready", level="INFO")
+
+    LTX2_ALL_DOWNLOAD_ATTEMPTED = True
+    return downloaded_any
 
 def ensure_required_models(workflow: Dict[str, Any]):
     """Ensure required models are present based on the workflow."""
+    if LTX2_DOWNLOAD_ALL:
+        download_all_ltx2_assets()
+        download_gemma_text_encoder(HF_TOKEN)
+
     required = {
         "checkpoints": set(),
         "loras": set(),
@@ -531,28 +883,28 @@ def ensure_required_models(workflow: Dict[str, Any]):
             if download_hf_file(LTX2_MODEL_REPO, ckpt_name, f"{MODEL_DIR}/checkpoints", HF_TOKEN):
                 downloaded_any = True
         else:
-            print(f"Checkpoint not found locally and repo unknown: {ckpt_name}")
+            log(f"Checkpoint not found locally and repo unknown: {ckpt_name}", level="WARN")
 
     for lora_name in sorted(required["loras"]):
         if lora_name.startswith("ltx-2-"):
             if download_hf_file(LTX2_MODEL_REPO, lora_name, f"{MODEL_DIR}/loras", HF_TOKEN):
                 downloaded_any = True
         else:
-            print(f"LoRA not found locally and repo unknown: {lora_name}")
+            log(f"LoRA not found locally and repo unknown: {lora_name}", level="WARN")
 
     for model_name in sorted(required["latent_upscale_models"]):
         if model_name.startswith("ltx-2-"):
             if download_hf_file(LTX2_MODEL_REPO, model_name, f"{MODEL_DIR}/latent_upscale_models", HF_TOKEN):
                 downloaded_any = True
         else:
-            print(f"Upscaler not found locally and repo unknown: {model_name}")
+            log(f"Upscaler not found locally and repo unknown: {model_name}", level="WARN")
 
     for encoder_path in sorted(required["text_encoders"]):
         if encoder_path.startswith(f"{GEMMA_DIRNAME}/") or encoder_path == GEMMA_DIRNAME:
             if download_gemma_text_encoder(HF_TOKEN):
                 downloaded_any = True
         else:
-            print(f"Text encoder not found locally and repo unknown: {encoder_path}")
+            log(f"Text encoder not found locally and repo unknown: {encoder_path}", level="WARN")
 
     if downloaded_any:
         global COMFY_RESTART_REQUIRED
@@ -560,88 +912,90 @@ def ensure_required_models(workflow: Dict[str, Any]):
 
 def download_models(force: bool = False):
     """Download LTX-2 models to network volume"""
-
-    # LTX-2 (19B) main model - fp8 quantized (~20GB)
-    model_path = f"{MODEL_DIR}/checkpoints/{LTX2_MODEL_FILENAME}"
-    if not os.path.exists(model_path) or force:
-        print(f"Downloading LTX-2 model ({LTX2_MODEL_FILENAME})...")
-        try:
-            url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/{LTX2_MODEL_FILENAME}"
-            fast_download(url, model_path, HF_TOKEN)
-        except Exception as e:
-            print(f"aria2c failed ({e}), falling back to hf_hub_download...")
-            hf_hub_download(
-                repo_id=LTX2_MODEL_REPO,
-                filename=LTX2_MODEL_FILENAME,
-                local_dir=f"{MODEL_DIR}/checkpoints",
-                token=HF_TOKEN or None,
-            )
-        print("LTX-2 model downloaded!")
-
-    # Spatial Upscaler (required for high-res output)
-    spatial_path = f"{MODEL_DIR}/latent_upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors"
-    if not os.path.exists(spatial_path) or force:
-        print("Downloading spatial upscaler...")
-        try:
-            url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors"
-            fast_download(url, spatial_path, HF_TOKEN)
-        except Exception as e:
-            print(f"aria2c failed ({e}), falling back to hf_hub_download...")
+    if LTX2_DOWNLOAD_ALL:
+        log("Downloading full LTX-2 asset set...", level="INFO")
+        download_all_ltx2_assets(force=force)
+    else:
+        # LTX-2 (19B) main model - fp8 quantized (~20GB)
+        model_path = f"{MODEL_DIR}/checkpoints/{LTX2_MODEL_FILENAME}"
+        if not os.path.exists(model_path) or force:
+            log(f"Downloading LTX-2 model ({LTX2_MODEL_FILENAME})...", level="INFO")
             try:
+                url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/{LTX2_MODEL_FILENAME}"
+                fast_download(url, model_path, HF_TOKEN)
+            except Exception as e:
+                log(f"aria2c failed ({e}), falling back to hf_hub_download...", level="WARN")
                 hf_hub_download(
                     repo_id=LTX2_MODEL_REPO,
-                    filename="ltx-2-spatial-upscaler-x2-1.0.safetensors",
-                    local_dir=f"{MODEL_DIR}/latent_upscale_models",
+                    filename=LTX2_MODEL_FILENAME,
+                    local_dir=f"{MODEL_DIR}/checkpoints",
                     token=HF_TOKEN or None,
                 )
-            except Exception as e2:
-                print(f"Spatial upscaler download note: {e2}")
+            log("LTX-2 model downloaded!", level="INFO")
 
-    # Temporal Upscaler (for more frames)
-    temporal_path = f"{MODEL_DIR}/latent_upscale_models/ltx-2-temporal-upscaler-x2-1.0.safetensors"
-    if not os.path.exists(temporal_path) or force:
-        print("Downloading temporal upscaler...")
-        try:
-            url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-temporal-upscaler-x2-1.0.safetensors"
-            fast_download(url, temporal_path, HF_TOKEN)
-        except Exception as e:
-            print(f"aria2c failed ({e}), falling back to hf_hub_download...")
+        # Spatial Upscaler (required for high-res output)
+        spatial_path = f"{MODEL_DIR}/latent_upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+        if not os.path.exists(spatial_path) or force:
+            log("Downloading spatial upscaler...", level="INFO")
             try:
-                hf_hub_download(
-                    repo_id=LTX2_MODEL_REPO,
-                    filename="ltx-2-temporal-upscaler-x2-1.0.safetensors",
-                    local_dir=f"{MODEL_DIR}/latent_upscale_models",
-                    token=HF_TOKEN or None,
-                )
-            except Exception as e2:
-                print(f"Temporal upscaler download note: {e2}")
+                url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+                fast_download(url, spatial_path, HF_TOKEN)
+            except Exception as e:
+                log(f"aria2c failed ({e}), falling back to hf_hub_download...", level="WARN")
+                try:
+                    hf_hub_download(
+                        repo_id=LTX2_MODEL_REPO,
+                        filename="ltx-2-spatial-upscaler-x2-1.0.safetensors",
+                        local_dir=f"{MODEL_DIR}/latent_upscale_models",
+                        token=HF_TOKEN or None,
+                    )
+                except Exception as e2:
+                    log(f"Spatial upscaler download note: {e2}", level="WARN")
 
-    # Distilled LoRA (for two-stage pipeline)
-    lora_path = f"{MODEL_DIR}/loras/ltx-2-19b-distilled-lora-384.safetensors"
-    if not os.path.exists(lora_path) or force:
-        print("Downloading distilled LoRA...")
-        try:
-            url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-19b-distilled-lora-384.safetensors"
-            fast_download(url, lora_path, HF_TOKEN)
-        except Exception as e:
-            print(f"aria2c failed ({e}), falling back to hf_hub_download...")
+        # Temporal Upscaler (for more frames)
+        temporal_path = f"{MODEL_DIR}/latent_upscale_models/ltx-2-temporal-upscaler-x2-1.0.safetensors"
+        if not os.path.exists(temporal_path) or force:
+            log("Downloading temporal upscaler...", level="INFO")
             try:
-                hf_hub_download(
-                    repo_id=LTX2_MODEL_REPO,
-                    filename="ltx-2-19b-distilled-lora-384.safetensors",
-                    local_dir=f"{MODEL_DIR}/loras",
-                    token=HF_TOKEN or None,
-                )
-            except Exception as e2:
-                print(f"Distilled LoRA download note: {e2}")
+                url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-temporal-upscaler-x2-1.0.safetensors"
+                fast_download(url, temporal_path, HF_TOKEN)
+            except Exception as e:
+                log(f"aria2c failed ({e}), falling back to hf_hub_download...", level="WARN")
+                try:
+                    hf_hub_download(
+                        repo_id=LTX2_MODEL_REPO,
+                        filename="ltx-2-temporal-upscaler-x2-1.0.safetensors",
+                        local_dir=f"{MODEL_DIR}/latent_upscale_models",
+                        token=HF_TOKEN or None,
+                    )
+                except Exception as e2:
+                    log(f"Temporal upscaler download note: {e2}", level="WARN")
 
-    print("All LTX-2 models ready!")
+        # Distilled LoRA (for two-stage pipeline)
+        lora_path = f"{MODEL_DIR}/loras/ltx-2-19b-distilled-lora-384.safetensors"
+        if not os.path.exists(lora_path) or force:
+            log("Downloading distilled LoRA...", level="INFO")
+            try:
+                url = f"https://huggingface.co/{LTX2_MODEL_REPO}/resolve/main/ltx-2-19b-distilled-lora-384.safetensors"
+                fast_download(url, lora_path, HF_TOKEN)
+            except Exception as e:
+                log(f"aria2c failed ({e}), falling back to hf_hub_download...", level="WARN")
+                try:
+                    hf_hub_download(
+                        repo_id=LTX2_MODEL_REPO,
+                        filename="ltx-2-19b-distilled-lora-384.safetensors",
+                        local_dir=f"{MODEL_DIR}/loras",
+                        token=HF_TOKEN or None,
+                    )
+                except Exception as e2:
+                    log(f"Distilled LoRA download note: {e2}", level="WARN")
+
+    download_gemma_text_encoder(HF_TOKEN)
+    log("All LTX-2 models ready!", level="INFO")
 
 def setup_environment(preload_models: bool = False):
     """Full setup on first run"""
-    print("=" * 50)
-    print("Setting up LTX-2 environment on network volume...")
-    print("=" * 50)
+    log("Setting up LTX-2 environment on network volume...", level="INFO")
 
     ensure_directories()
     install_comfyui()
@@ -650,7 +1004,7 @@ def setup_environment(preload_models: bool = False):
     if preload_models:
         download_models()
 
-    print("Setup complete!")
+    log("Setup complete!", level="INFO")
 
 # =============================================================================
 # ComfyUI Helpers
@@ -662,7 +1016,7 @@ def ensure_comfyui_running():
 
     if COMFY_PROCESS and COMFY_PROCESS.poll() is None:
         if COMFY_RESTART_REQUIRED:
-            print("Restarting ComfyUI to apply updated model paths...")
+            log("Restarting ComfyUI to apply updated model paths...", level="INFO")
             COMFY_PROCESS.terminate()
             try:
                 COMFY_PROCESS.wait(timeout=10)
@@ -689,7 +1043,7 @@ def ensure_comfyui_running():
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
 
-    print(f"Starting ComfyUI: {' '.join(cmd)}")
+    log(f"Starting ComfyUI: {' '.join(cmd)}", level="INFO")
     COMFY_PROCESS = subprocess.Popen(
         cmd,
         env=env,
@@ -708,7 +1062,7 @@ def ensure_comfyui_running():
         try:
             resp = requests.get(f"{COMFY_URL}/history", timeout=2)
             if resp.status_code == 200:
-                print(f"ComfyUI started successfully after {i} seconds")
+                log(f"ComfyUI started successfully after {i} seconds", level="INFO")
                 return
         except Exception:
             pass
@@ -749,6 +1103,61 @@ def download_input_image(value: str) -> str:
     # Assume it's already a filename in input dir
     return value
 
+def _coerce_image_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str) and item.strip()]
+    if isinstance(value, str) and value.strip():
+        return [value]
+    return []
+
+def _coerce_keyframes(value: Any) -> List[int]:
+    if value is None:
+        return []
+    frames: List[int] = []
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        for part in parts:
+            try:
+                frames.append(int(float(part)))
+            except ValueError:
+                continue
+        return frames
+    if isinstance(value, list):
+        for item in value:
+            try:
+                frames.append(int(float(item)))
+            except (TypeError, ValueError):
+                continue
+    return frames
+
+def _normalize_keyframes(count: int, keyframes: List[int], num_frames: Optional[int]) -> List[int]:
+    if count <= 0:
+        return []
+    if keyframes and len(keyframes) == count:
+        if num_frames:
+            min_idx = -(num_frames - 1)
+            max_idx = num_frames - 1
+            return [max(min(idx, max_idx), min_idx) for idx in keyframes]
+        return keyframes
+
+    if not num_frames:
+        return list(range(count))
+
+    if count == 1:
+        return [0]
+
+    max_idx = num_frames - 1
+    return [
+        min(max(round(i * max_idx / (count - 1)), 0), max_idx)
+        for i in range(count)
+    ]
+
+def _next_node_id(workflow: Dict[str, Any], start: int = 0) -> int:
+    ids = [int(key) for key in workflow.keys() if str(key).isdigit()]
+    return max(ids or [start]) + 1
+
 def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) -> Dict[str, Any]:
     """Apply prompt parameters to the prompt-format workflow."""
     prompt = job_input.get("prompt")
@@ -769,10 +1178,28 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         or job_input.get("image")
         or job_input.get("image_url")
     )
+    input_images = _coerce_image_list(job_input.get("input_images"))
+    input_keyframes = _coerce_keyframes(
+        job_input.get("input_keyframes")
+        or job_input.get("input_keyframe_indices")
+    )
+    if not input_images and input_image:
+        input_images = [input_image]
+    if input_images:
+        input_image = input_images[0]
     has_load_image = False
     clip_nodes: Dict[str, Dict[str, Any]] = {}
     conditioning_nodes: List[Dict[str, Any]] = []
+    conditioning_node_ids: List[str] = []
+    load_image_nodes: List[str] = []
+    img_to_video_nodes: List[tuple] = []
+    concat_nodes: List[tuple] = []
+    cfg_guiders: List[str] = []
+    empty_latent_node_id: Optional[str] = None
+    upscaled_latent_node_id: Optional[str] = None
+    vae_ref = None
     noise_offset = 0
+    use_keyframes = bool(input_keyframes) or len(input_images) > 1
 
     if isinstance(prompt, str):
         prompt = prompt.strip()
@@ -808,6 +1235,10 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
 
         if class_type == "LTXVConditioning":
             conditioning_nodes.append(node)
+            conditioning_node_ids.append(str(node_id))
+
+        if class_type == "LoadImage":
+            load_image_nodes.append(str(node_id))
 
         if class_type == "CheckpointLoaderSimple" and model_choice:
             inputs["ckpt_name"] = selected_ckpt
@@ -862,11 +1293,15 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
 
         if class_type == "LoadImage":
             has_load_image = True
-            if input_image:
+            if input_image and not use_keyframes:
                 inputs["image"] = download_input_image(input_image)
 
-        if class_type == "LTXVImgToVideoInplace" and image_strength is not None:
-            inputs["strength"] = float(image_strength)
+        if class_type == "LTXVImgToVideoInplace":
+            if image_strength is not None:
+                inputs["strength"] = float(image_strength)
+            img_to_video_nodes.append((str(node_id), inputs))
+            if vae_ref is None and inputs.get("vae"):
+                vae_ref = inputs.get("vae")
 
         if class_type == "LTXVSampler":
             if steps is not None:
@@ -878,6 +1313,18 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
 
         if class_type == "LTXVAudioGenerate" and prompt is not None:
             inputs["prompt"] = prompt
+
+        if class_type == "LTXVConcatAVLatent":
+            concat_nodes.append((str(node_id), inputs))
+
+        if class_type == "CFGGuider":
+            cfg_guiders.append(str(node_id))
+
+        if class_type == "EmptyLTXVLatentVideo":
+            empty_latent_node_id = str(node_id)
+
+        if class_type == "LTXVLatentUpsampler":
+            upscaled_latent_node_id = str(node_id)
 
     if negative_prompt is not None and clip_nodes and conditioning_nodes:
         existing_ids = [int(key) for key in workflow.keys() if str(key).isdigit()]
@@ -912,7 +1359,112 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
                     next_id += 1
                 inputs["negative"] = [negative_clip_id, 0]
 
-    if has_load_image and not input_image:
+    if use_keyframes and input_images:
+        if not load_image_nodes:
+            raise ValueError("Workflow is missing a LoadImage node required for keyframes.")
+        if not conditioning_node_ids:
+            raise ValueError("Workflow is missing LTXVConditioning required for keyframes.")
+        if not empty_latent_node_id:
+            raise ValueError("Workflow is missing EmptyLTXVLatentVideo required for keyframes.")
+        if not vae_ref:
+            raise ValueError("Workflow is missing VAE reference required for keyframes.")
+
+        image_files = [download_input_image(value) for value in input_images]
+        workflow[load_image_nodes[0]]["inputs"]["image"] = image_files[0]
+
+        image_node_ids = [load_image_nodes[0]]
+        next_id = _next_node_id(workflow)
+        for image_file in image_files[1:]:
+            node_id = str(next_id)
+            next_id += 1
+            workflow[node_id] = {
+                "class_type": "LoadImage",
+                "inputs": {"image": image_file},
+            }
+            image_node_ids.append(node_id)
+
+        effective_frames = num_frames
+        if effective_frames is None and empty_latent_node_id:
+            try:
+                effective_frames = int(workflow[empty_latent_node_id]["inputs"].get("length"))
+            except Exception:
+                effective_frames = None
+
+        keyframes = _normalize_keyframes(len(image_node_ids), input_keyframes, effective_frames)
+        strength_value = float(image_strength) if image_strength is not None else 0.6
+
+        def add_keyframe_chain(base_latent_ref):
+            nonlocal next_id
+            pos_ref = [conditioning_node_ids[0], 0]
+            neg_ref = [conditioning_node_ids[0], 1]
+            latent_ref = base_latent_ref
+            for image_node_id, frame_idx in zip(image_node_ids, keyframes):
+                node_id = str(next_id)
+                next_id += 1
+                workflow[node_id] = {
+                    "class_type": "LTXVAddGuideAdvanced",
+                    "inputs": {
+                        "positive": pos_ref,
+                        "negative": neg_ref,
+                        "vae": vae_ref,
+                        "latent": latent_ref,
+                        "image": [image_node_id, 0],
+                        "frame_idx": int(frame_idx),
+                        "strength": strength_value,
+                        "crf": 29,
+                        "blur_radius": 0,
+                        "interpolation": "lanczos",
+                        "crop": "disabled",
+                    },
+                }
+                pos_ref = [node_id, 0]
+                neg_ref = [node_id, 1]
+                latent_ref = [node_id, 2]
+            return pos_ref, neg_ref, latent_ref
+
+        stage1_pos = stage1_neg = stage1_latent = None
+        stage2_pos = stage2_neg = stage2_latent = None
+
+        stage1_pos, stage1_neg, stage1_latent = add_keyframe_chain([empty_latent_node_id, 0])
+        if upscaled_latent_node_id:
+            stage2_pos, stage2_neg, stage2_latent = add_keyframe_chain([upscaled_latent_node_id, 0])
+        else:
+            stage2_pos, stage2_neg, stage2_latent = stage1_pos, stage1_neg, stage1_latent
+
+        cfg_sorted = sorted(cfg_guiders, key=lambda key: int(key) if str(key).isdigit() else key)
+        if cfg_sorted and stage1_pos:
+            workflow[cfg_sorted[0]]["inputs"]["positive"] = stage1_pos
+            workflow[cfg_sorted[0]]["inputs"]["negative"] = stage1_neg
+        if len(cfg_sorted) > 1 and stage2_pos:
+            workflow[cfg_sorted[1]]["inputs"]["positive"] = stage2_pos
+            workflow[cfg_sorted[1]]["inputs"]["negative"] = stage2_neg
+
+        stage1_img_node = None
+        stage2_img_node = None
+        for node_id, inputs in img_to_video_nodes:
+            latent_ref = inputs.get("latent")
+            if isinstance(latent_ref, list) and empty_latent_node_id and latent_ref[0] == empty_latent_node_id:
+                stage1_img_node = node_id
+            elif isinstance(latent_ref, list) and upscaled_latent_node_id and latent_ref[0] == upscaled_latent_node_id:
+                stage2_img_node = node_id
+
+        updated = False
+        for node_id, inputs in concat_nodes:
+            video_ref = inputs.get("video_latent")
+            if stage1_latent and stage1_img_node and isinstance(video_ref, list) and video_ref[0] == stage1_img_node:
+                inputs["video_latent"] = stage1_latent
+                updated = True
+            elif stage2_latent and stage2_img_node and isinstance(video_ref, list) and video_ref[0] == stage2_img_node:
+                inputs["video_latent"] = stage2_latent
+                updated = True
+
+        if not updated and concat_nodes and stage1_latent:
+            concat_nodes_sorted = sorted(concat_nodes, key=lambda entry: int(entry[0]) if str(entry[0]).isdigit() else entry[0])
+            concat_nodes_sorted[0][1]["video_latent"] = stage1_latent
+            if len(concat_nodes_sorted) > 1 and stage2_latent:
+                concat_nodes_sorted[1][1]["video_latent"] = stage2_latent
+
+    if has_load_image and not input_images:
         raise ValueError("input_image is required for image-to-video workflows")
 
     return workflow
@@ -925,7 +1477,7 @@ def queue_prompt(prompt: Dict[str, Any]) -> str:
         raise RuntimeError(f"ComfyUI prompt rejected ({resp.status_code}): {error_detail}")
     data = resp.json()
     prompt_id = data["prompt_id"]
-    print(f"ComfyUI prompt queued: {prompt_id}")
+    log(f"ComfyUI prompt queued: {prompt_id}", level="INFO")
     return prompt_id
 
 def get_queue_snapshot() -> Optional[Dict[str, Any]]:
@@ -940,6 +1492,7 @@ def get_queue_snapshot() -> Optional[Dict[str, Any]]:
 def wait_for_prompt(prompt_id: str, timeout_seconds: int = 1800) -> Dict[str, Any]:
     start = time.time()
     last_log = 0.0
+    last_queue = None
     while time.time() - start < timeout_seconds:
         resp = requests.get(f"{COMFY_URL}/history/{prompt_id}", timeout=10)
         if resp.status_code == 200:
@@ -950,14 +1503,17 @@ def wait_for_prompt(prompt_id: str, timeout_seconds: int = 1800) -> Dict[str, An
                 if outputs:
                     return entry
         now = time.time()
-        if now - last_log >= 30:
+        if now - last_log >= STATUS_LOG_INTERVAL:
             elapsed = int(now - start)
-            print(f"Waiting for prompt {prompt_id}... {elapsed}s elapsed")
+            log(f"ComfyUI running... prompt={prompt_id} elapsed={elapsed}s", level="INFO")
             queue = get_queue_snapshot()
             if queue:
                 running = len(queue.get("queue_running", []))
                 pending = len(queue.get("queue_pending", []))
-                print(f"ComfyUI queue: running={running} pending={pending}")
+                snapshot = (running, pending)
+                if snapshot != last_queue:
+                    log(f"ComfyUI queue: running={running} pending={pending}", level="DEBUG")
+                    last_queue = snapshot
             last_log = now
         time.sleep(2)
     raise TimeoutError("ComfyUI prompt timed out")
@@ -993,12 +1549,12 @@ def run_comfyui_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
     files = extract_output_files(entry)
     if not files:
         raise RuntimeError("No output files produced by ComfyUI")
-    print(f"ComfyUI produced {len(files)} file(s)")
+    log(f"ComfyUI produced {len(files)} file(s)", level="INFO")
     for item in files:
         filename = item.get("filename", "unknown")
         out_type = item.get("type", "output")
         subfolder = item.get("subfolder", "")
-        print(f"ComfyUI output: {filename} (type={out_type}, subfolder={subfolder})")
+        log(f"ComfyUI output: {filename} (type={out_type}, subfolder={subfolder})", level="DEBUG")
     return files
 
 # =============================================================================
@@ -1061,15 +1617,16 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     """RunPod serverless handler"""
     start_time = time.time()
     job_input = event.get("input", {})
-    _log_ltx2_event("job_input", job_input)
+    log_job_summary(job_input)
+    _log_ltx2_event("job_input", job_input, level="DEBUG")
 
     try:
         action = job_input.get("action", "generate")
-        _log_ltx2_event("action", {"action": action})
+        _log_ltx2_event("action", {"action": action}, level="DEBUG")
 
         setup_environment(preload_models=PRELOAD_MODELS and action != "sync_models")
         gpu = detect_gpu()
-        print(f"GPU: {gpu['gpu_name']} ({gpu['vram_gb']}GB)")
+        log(f"GPU: {gpu['gpu_name']} ({gpu['vram_gb']}GB)", level="INFO")
 
         if action == "sync_models":
             download_models(force=job_input.get("force", False))
@@ -1135,15 +1692,19 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 or job_input.get("image")
                 or job_input.get("image_url")
             )
+            input_images = _coerce_image_list(job_input.get("input_images"))
+            if input_images:
+                input_image = input_images[0]
             requires_prompt = isinstance(workflow_input, str) and "image" not in str(workflow_input).lower()
             if requires_prompt and not prompt_text and not input_image:
                 error_msg = "prompt is required for text-to-video workflows"
-                _log_ltx2_event("validation_error", {"error": error_msg, "workflow": workflow_input})
+                _log_ltx2_event("validation_error", {"error": error_msg, "workflow": workflow_input}, level="WARN")
                 return {"status": "error", "error": error_msg}
 
             # Optionally update workflow inputs if provided
             workflow_label = "<inline>" if isinstance(workflow_input, dict) else str(workflow_input)
-            _log_ltx2_event("workflow_selected", {"workflow": workflow_label})
+            log(f"Workflow selected: {workflow_label}", level="INFO")
+            _log_ltx2_event("workflow_selected", {"workflow": workflow_label}, level="DEBUG")
             updated = False
             if any(k in job_input for k in ["prompt", "negative_prompt", "width", "height", "num_frames", "fps", "steps", "cfg_scale", "seed", "duration_seconds", "input_image", "input_image_url", "image", "image_url", "image_strength", "model"]):
                 workflow = update_workflow_inputs(workflow, job_input)
@@ -1158,7 +1719,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 summary["seed_source"] = "default"
             else:
                 summary["seed_source"] = "client"
-            _log_ltx2_event("workflow_summary", summary)
+            log_workflow_summary(summary)
+            _log_ltx2_event("workflow_summary", summary, level="DEBUG")
 
             # Ensure required models exist before sending to ComfyUI
             ensure_required_models(workflow)
@@ -1174,7 +1736,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                         content_type = "image/gif"
                     uploaded.append(upload_to_s3(str(path), content_type=content_type))
 
-            _log_ltx2_event("generation_outputs", uploaded)
+            _log_ltx2_event("generation_outputs", uploaded, level="DEBUG")
 
             return {
                 "status": "success",
@@ -1184,14 +1746,14 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             }
 
         error_result = {"status": "error", "error": f"Unknown action: {action}"}
-        _log_ltx2_event("handler_error", error_result)
+        _log_ltx2_event("handler_error", error_result, level="WARN")
         return error_result
 
     except Exception as e:
         error_result = {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
-        _log_ltx2_event("handler_exception", {"error": str(e)})
+        _log_ltx2_event("handler_exception", {"error": str(e)}, level="ERROR")
         return error_result
 
 if __name__ == "__main__":
-    print("LTX-2 Worker Starting...")
+    log("LTX-2 Worker Starting...", level="INFO")
     runpod.serverless.start({"handler": handler})
