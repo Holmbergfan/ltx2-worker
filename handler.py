@@ -764,11 +764,47 @@ def _classify_ltx2_asset(filename: str) -> str:
         return f"{MODEL_DIR}/loras"
     return f"{MODEL_DIR}/checkpoints"
 
-def _download_repo_asset(repo_id: str, repo_path: str, dest_dir: str, token: str = None, force: bool = False) -> bool:
+# Minimum file sizes (in bytes) for validation - files smaller than this are likely corrupted
+MIN_FILE_SIZES = {
+    "ltx-2-19b": 1_000_000_000,  # Main models should be >1GB
+    "upscaler": 100_000_000,     # Upscalers should be >100MB
+    "lora": 100_000_000,         # LoRAs should be >100MB
+}
+
+def _get_min_size(filename: str) -> int:
+    """Get minimum expected file size for validation."""
+    lower = filename.lower()
+    if "upscaler" in lower:
+        return MIN_FILE_SIZES["upscaler"]
+    if "lora" in lower:
+        return MIN_FILE_SIZES["lora"]
+    if "ltx-2-19b" in lower:
+        return MIN_FILE_SIZES["ltx-2-19b"]
+    return 0
+
+def _download_repo_asset(repo_id: str, repo_path: str, dest_dir: str, token: str = None, force: bool = False) -> Optional[bool]:
+    """Download asset from HuggingFace repo.
+
+    Returns:
+        True: Downloaded successfully
+        False: Download failed
+        None: File already exists and is valid (no download needed)
+    """
     dest_path = Path(dest_dir) / os.path.basename(repo_path)
+    min_size = _get_min_size(repo_path)
+
+    # Check if file exists and is valid (not empty/corrupted)
     if dest_path.exists() and not force:
-        return False
+        file_size = dest_path.stat().st_size
+        if file_size >= min_size:
+            log(f"Skipping {repo_path} (already exists, {file_size / 1e9:.2f}GB)", level="DEBUG")
+            return None  # File exists and is valid
+        else:
+            log(f"Removing corrupted/empty file: {dest_path} ({file_size} bytes)", level="WARN")
+            dest_path.unlink()
+
     dest_path.parent.mkdir(parents=True, exist_ok=True)
+    log(f"Downloading: {repo_path}", level="INFO")
     try:
         url = f"https://huggingface.co/{repo_id}/resolve/main/{repo_path}"
         fast_download(url, str(dest_path), token)
@@ -814,6 +850,7 @@ def download_all_ltx2_assets(force: bool = False) -> bool:
 
     downloaded_any = False
     failed = 0
+    skipped = 0
     total = 0
 
     for base in sorted(candidates):
@@ -822,20 +859,24 @@ def download_all_ltx2_assets(force: bool = False) -> bool:
         total += 1
         dest_dir = _classify_ltx2_asset(base)
         possible_paths = paths_by_base.get(base) or paths_by_base_lower.get(base.lower()) or [base]
-        success = False
+        result = False
         for repo_path in possible_paths:
-            if _download_repo_asset(LTX2_MODEL_REPO, repo_path, dest_dir, HF_TOKEN, force=force):
+            result = _download_repo_asset(LTX2_MODEL_REPO, repo_path, dest_dir, HF_TOKEN, force=force)
+            if result is True:
                 downloaded_any = True
-                success = True
                 break
-        if not success:
+            elif result is None:
+                skipped += 1  # File already exists and is valid
+                break
+        if result is False:
             failed += 1
             log(f"Failed to download {base}", level="WARN")
 
+    ready = total - failed
     if failed:
-        log(f"LTX-2 full download: {total - failed}/{total} assets ready (failed {failed})", level="WARN")
+        log(f"LTX-2 assets: {ready}/{total} ready ({skipped} cached, {ready - skipped} downloaded, {failed} failed)", level="WARN")
     else:
-        log(f"LTX-2 full download: {total} assets ready", level="INFO")
+        log(f"LTX-2 assets: {total} ready ({skipped} cached, {total - skipped} downloaded)", level="INFO")
 
     LTX2_ALL_DOWNLOAD_ATTEMPTED = True
     return downloaded_any
