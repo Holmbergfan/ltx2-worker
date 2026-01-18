@@ -432,26 +432,34 @@ GEMMA_DIRNAME = os.environ.get("GEMMA_DIRNAME", "gemma-3-12b-it-qat-q4_0-unquant
 PRELOAD_MODELS = os.environ.get("PRELOAD_MODELS", "true").lower() in ("1", "true", "yes")
 LTX2_DOWNLOAD_ALL = os.environ.get("LTX2_DOWNLOAD_ALL", "true").lower() in ("1", "true", "yes")
 
+# Actual files that exist in Lightricks/LTX-2 repo (verified 2026-01-18)
 LTX2_README_FILES = [
-    "ltx-2-19b-dev-fp8.safetensors",
-    "ltx-2-19b-dev.safetensors",
-    "ltx-2-19b-distilled.safetensors",
-    "ltx-2-19b-distilled-fp8.safetensors",
-    "ltx-2-spatial-upscaler-x2-1.0.safetensors",
-    "ltx-2-temporal-upscaler-x2-1.0.safetensors",
-    "ltx-2-19b-distilled-lora-384.safetensors",
-    "ltx-2-19b-IC-LoRA-Canny-Control.safetensors",
-    "ltx-2-19b-IC-LoRA-Depth-Control.safetensors",
-    "ltx-2-19b-IC-LoRA-Detailer.safetensors",
-    "ltx-2-19b-IC-LoRA-Pose-Control.safetensors",
-    "ltx-2-19b-LoRA-Camera-Control-Dolly-In.safetensors",
-    "ltx-2-19b-LoRA-Camera-Control-Dolly-Left.safetensors",
-    "ltx-2-19b-LoRA-Camera-Control-Dolly-Out.safetensors",
-    "ltx-2-19b-LoRA-Camera-Control-Dolly-Right.safetensors",
-    "ltx-2-19b-LoRA-Camera-Control-Jib-Down.safetensors",
-    "ltx-2-19b-LoRA-Camera-Control-Jib-Up.safetensors",
-    "ltx-2-19b-LoRA-Camera-Control-Static.safetensors",
+    "ltx-2-19b-distilled-fp8.safetensors",      # Main distilled model (fp8) - ~27GB
+    "ltx-2-19b-dev-fp8.safetensors",            # Main full model (fp8) - ~27GB
+    "ltx-2-19b-distilled.safetensors",          # Distilled full precision - ~43GB
+    "ltx-2-19b-dev.safetensors",                # Full model full precision - ~43GB
+    "ltx-2-19b-dev-fp4.safetensors",            # Full model fp4 quantized - ~20GB
+    "ltx-2-19b-distilled-lora-384.safetensors", # Distilled LoRA - ~8GB
+    "ltx-2-spatial-upscaler-x2-1.0.safetensors", # Spatial upscaler - ~1GB
+    "ltx-2-temporal-upscaler-x2-1.0.safetensors", # Temporal upscaler - ~0.3GB
 ]
+
+# IC-LoRA and Camera Control LoRAs are in separate repos (each ~624MB)
+# Format: (repo_id, filename, dest_subdir)
+LTX2_LORA_REPOS = [
+    ("Lightricks/LTX-2-19b-IC-LoRA-Canny-Control", "ltx-2-19b-ic-lora-canny-control.safetensors", "loras"),
+    ("Lightricks/LTX-2-19b-IC-LoRA-Depth-Control", "ltx-2-19b-ic-lora-depth-control.safetensors", "loras"),
+    ("Lightricks/LTX-2-19b-IC-LoRA-Pose-Control", "ltx-2-19b-ic-lora-pose-control.safetensors", "loras"),
+    ("Lightricks/LTX-2-19b-IC-LoRA-Detailer", "ltx-2-19b-ic-lora-detailer.safetensors", "loras"),
+    ("Lightricks/LTX-2-19b-LoRA-Camera-Control-Static", "ltx-2-19b-lora-camera-control-static.safetensors", "loras"),
+    ("Lightricks/LTX-2-19b-LoRA-Camera-Control-Jib-Up", "ltx-2-19b-lora-camera-control-jib-up.safetensors", "loras"),
+    ("Lightricks/LTX-2-19b-LoRA-Camera-Control-Jib-Down", "ltx-2-19b-lora-camera-control-jib-down.safetensors", "loras"),
+    ("Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-In", "ltx-2-19b-lora-camera-control-dolly-in.safetensors", "loras"),
+    ("Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-Out", "ltx-2-19b-lora-camera-control-dolly-out.safetensors", "loras"),
+    ("Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-Left", "ltx-2-19b-lora-camera-control-dolly-left.safetensors", "loras"),
+    ("Lightricks/LTX-2-19b-LoRA-Camera-Control-Dolly-Right", "ltx-2-19b-lora-camera-control-dolly-right.safetensors", "loras"),
+]
+LTX2_DOWNLOAD_LORAS = os.environ.get("LTX2_DOWNLOAD_LORAS", "false").lower() in ("1", "true", "yes")
 
 # S3 Storage
 S3_BUCKET = os.environ.get("S3_BUCKET", "ltx2-models")
@@ -832,6 +840,42 @@ def download_all_ltx2_assets(force: bool = False) -> bool:
     LTX2_ALL_DOWNLOAD_ATTEMPTED = True
     return downloaded_any
 
+def download_lora_repos(force: bool = False) -> bool:
+    """Download IC-LoRA and Camera Control LoRAs from their separate repos."""
+    if not LTX2_DOWNLOAD_LORAS:
+        return False
+
+    downloaded_any = False
+    for repo_id, filename, dest_subdir in LTX2_LORA_REPOS:
+        dest_dir = f"{MODEL_DIR}/{dest_subdir}"
+        dest_path = Path(dest_dir) / filename
+        if dest_path.exists() and not force:
+            continue
+
+        log(f"Downloading {filename} from {repo_id}...", level="INFO")
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            # Try aria2c first
+            url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+            fast_download(url, str(dest_path), HF_TOKEN)
+            downloaded_any = True
+        except Exception as e:
+            log(f"aria2c failed ({e}), falling back to hf_hub_download...", level="WARN")
+            try:
+                local_path = hf_hub_download(
+                    repo_id=repo_id,
+                    filename=filename,
+                    token=HF_TOKEN or None,
+                )
+                shutil.copyfile(local_path, dest_path)
+                downloaded_any = True
+            except Exception as e2:
+                log(f"Failed to download {filename}: {e2}", level="WARN")
+
+    if downloaded_any:
+        log("Additional LoRA downloads complete!", level="INFO")
+    return downloaded_any
+
 def ensure_required_models(workflow: Dict[str, Any]):
     """Ensure required models are present based on the workflow."""
     if LTX2_DOWNLOAD_ALL:
@@ -885,8 +929,39 @@ def ensure_required_models(workflow: Dict[str, Any]):
         else:
             log(f"Checkpoint not found locally and repo unknown: {ckpt_name}", level="WARN")
 
+    # Build lookup for LoRAs in separate repos
+    lora_repo_map = {filename: (repo_id, filename) for repo_id, filename, _ in LTX2_LORA_REPOS}
+
     for lora_name in sorted(required["loras"]):
-        if lora_name.startswith("ltx-2-"):
+        lora_path = Path(f"{MODEL_DIR}/loras") / lora_name
+        if lora_path.exists():
+            continue
+
+        # Check if it's in a separate repo
+        lora_lower = lora_name.lower()
+        found_in_repo = None
+        for repo_filename, (repo_id, _) in lora_repo_map.items():
+            if lora_lower == repo_filename.lower():
+                found_in_repo = (repo_id, repo_filename)
+                break
+
+        if found_in_repo:
+            repo_id, filename = found_in_repo
+            log(f"Downloading {filename} from {repo_id}...", level="INFO")
+            try:
+                url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+                fast_download(url, str(lora_path), HF_TOKEN)
+                downloaded_any = True
+            except Exception as e:
+                log(f"aria2c failed ({e}), falling back to hf_hub_download...", level="WARN")
+                try:
+                    local_path = hf_hub_download(repo_id=repo_id, filename=filename, token=HF_TOKEN or None)
+                    shutil.copyfile(local_path, lora_path)
+                    downloaded_any = True
+                except Exception as e2:
+                    log(f"Failed to download {lora_name}: {e2}", level="WARN")
+        elif lora_name.startswith("ltx-2-"):
+            # Try main LTX-2 repo
             if download_hf_file(LTX2_MODEL_REPO, lora_name, f"{MODEL_DIR}/loras", HF_TOKEN):
                 downloaded_any = True
         else:
@@ -991,6 +1066,10 @@ def download_models(force: bool = False):
                     log(f"Distilled LoRA download note: {e2}", level="WARN")
 
     download_gemma_text_encoder(HF_TOKEN)
+
+    # Download additional LoRAs from separate repos if enabled
+    download_lora_repos(force=force)
+
     log("All LTX-2 models ready!", level="INFO")
 
 def setup_environment(preload_models: bool = False):
