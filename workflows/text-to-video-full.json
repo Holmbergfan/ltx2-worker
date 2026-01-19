@@ -52,10 +52,7 @@
           "5233",
           0
         ],
-        "frame_rate": [
-          "5235",
-          0
-        ],
+        "frame_rate": 24,
         "batch_size": 1
       }
     },
@@ -298,15 +295,6 @@
         "height": 1088,
         "batch_size": 1,
         "color": 0
-      }
-    },
-    "5235": {
-      "class_type": "CM_FloatToInt",
-      "inputs": {
-        "a": [
-          "5236",
-          0
-        ]
       }
     },
     "5236": {

@@ -96,7 +96,7 @@
           0
         ],
         "positive": [
-          "5227",
+          "5173",
           0
         ],
         "negative": [
@@ -110,8 +110,8 @@
       "class_type": "LTXVSpatioTemporalTiledVAEDecode",
       "inputs": {
         "vae": [
-          "5227",
-          1
+          "5176",
+          2
         ],
         "latents": [
           "5231",
@@ -145,19 +145,6 @@
         "noise_seed": 50
       }
     },
-    "5227": {
-      "class_type": "ImpactExecutionOrderController",
-      "inputs": {
-        "signal": [
-          "5173",
-          0
-        ],
-        "value": [
-          "5176",
-          2
-        ]
-      }
-    },
     "5228": {
       "class_type": "LTXVEmptyLatentAudio",
       "inputs": {
@@ -169,10 +156,7 @@
           "5186",
           0
         ],
-        "frame_rate": [
-          "5196",
-          0
-        ],
+        "frame_rate": 24,
         "batch_size": 1
       }
     },
@@ -234,7 +218,7 @@
           0
         ],
         "positive": [
-          "5227",
+          "5173",
           0
         ],
         "negative": [
@@ -261,8 +245,8 @@
       "class_type": "LTXVImgToVideoInplace",
       "inputs": {
         "vae": [
-          "5227",
-          1
+          "5176",
+          2
         ],
         "image": [
           "5242",
@@ -288,8 +272,8 @@
           0
         ],
         "vae": [
-          "5227",
-          1
+          "5176",
+          2
         ]
       }
     },
@@ -297,8 +281,8 @@
       "class_type": "LTXVImgToVideoInplace",
       "inputs": {
         "vae": [
-          "5227",
-          1
+          "5176",
+          2
         ],
         "image": [
           "5229",
@@ -366,15 +350,6 @@
       "class_type": "PrimitiveInt",
       "inputs": {
         "value": 121
-      }
-    },
-    "5196": {
-      "class_type": "CM_FloatToInt",
-      "inputs": {
-        "a": [
-          "5184",
-          0
-        ]
       }
     },
     "5190": {

@@ -61,10 +61,7 @@
           "5218",
           0
         ],
-        "frame_rate": [
-          "5220",
-          0
-        ],
+        "frame_rate": 24,
         "batch_size": 1
       }
     },
@@ -288,15 +285,6 @@
       "class_type": "PrimitiveInt",
       "inputs": {
         "value": 121
-      }
-    },
-    "5220": {
-      "class_type": "CM_FloatToInt",
-      "inputs": {
-        "a": [
-          "5221",
-          0
-        ]
       }
     },
     "5221": {

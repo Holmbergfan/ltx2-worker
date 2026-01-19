@@ -101,7 +101,7 @@
           0
         ],
         "positive": [
-          "5239",
+          "5173",
           0
         ],
         "negative": [
@@ -131,7 +131,7 @@
           0
         ],
         "positive": [
-          "5239",
+          "5173",
           0
         ],
         "negative": [
@@ -152,10 +152,7 @@
           "5186",
           0
         ],
-        "frame_rate": [
-          "5196",
-          0
-        ],
+        "frame_rate": 24,
         "batch_size": 1
       }
     },
@@ -232,8 +229,8 @@
       "class_type": "ResizeImagesByLongerEdge",
       "inputs": {
         "images": [
-          "5239",
-          1
+          "5180",
+          0
         ],
         "longer_edge": 1536
       }
@@ -327,19 +324,6 @@
         "bypass": false
       }
     },
-    "5239": {
-      "class_type": "ImpactExecutionOrderController",
-      "inputs": {
-        "signal": [
-          "5173",
-          0
-        ],
-        "value": [
-          "5180",
-          0
-        ]
-      }
-    },
     "5240": {
       "class_type": "RandomNoise",
       "inputs": {
@@ -359,15 +343,6 @@
       "class_type": "PrimitiveInt",
       "inputs": {
         "value": 121
-      }
-    },
-    "5196": {
-      "class_type": "CM_FloatToInt",
-      "inputs": {
-        "a": [
-          "5184",
-          0
-        ]
       }
     },
     "5190": {
