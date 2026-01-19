@@ -392,10 +392,6 @@
         "model_name": "ltx-2-spatial-upscaler-x2-1.0.safetensors"
       }
     },
-    "5247": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
-    },
     "5225": {
       "class_type": "LTXVGemmaEnhancePrompt",
       "inputs": {
@@ -426,18 +422,6 @@
         "ltxv_path": "ltx-2-19b-distilled.safetensors",
         "max_length": 1024
       }
-    },
-    "5248": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
-    },
-    "5246": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
-    },
-    "5245": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
     }
   }
 }

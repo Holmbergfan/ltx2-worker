@@ -450,14 +450,6 @@
         "model_name": "ltx-2-spatial-upscaler-x2-1.0.safetensors"
       }
     },
-    "5213": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
-    },
-    "5214": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
-    },
     "5192": {
       "class_type": "LTXVGemmaEnhancePrompt",
       "inputs": {
@@ -498,14 +490,6 @@
       "inputs": {
         "image": "1764018029794-IMG_4361.jpeg"
       }
-    },
-    "5211": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
-    },
-    "5212": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
     }
   }
 }

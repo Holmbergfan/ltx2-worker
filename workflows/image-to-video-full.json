@@ -296,14 +296,6 @@
         "bypass": false
       }
     },
-    "5238": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
-    },
-    "5239": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
-    },
     "5240": {
       "class_type": "ImageScaleBy",
       "inputs": {
@@ -509,10 +501,6 @@
         "color": 0
       }
     },
-    "5215": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
-    },
     "5178": {
       "class_type": "LTXVGemmaCLIPModelLoader",
       "inputs": {
@@ -531,18 +519,6 @@
         "lora_name": "ltx-2-19b-distilled-lora-384.safetensors",
         "strength_model": 0.6
       }
-    },
-    "5216": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
-    },
-    "5213": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
-    },
-    "5214": {
-      "class_type": "MarkdownNote",
-      "inputs": {}
     }
   }
 }
