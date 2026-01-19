@@ -1293,8 +1293,36 @@ def _next_node_id(workflow: Dict[str, Any], start: int = 0) -> int:
     ids = [int(key) for key in workflow.keys() if str(key).isdigit()]
     return max(ids or [start]) + 1
 
+def _normalize_link_value(value: Any) -> Any:
+    if isinstance(value, list):
+        if len(value) == 2 and isinstance(value[0], (int, float)) and not isinstance(value[0], bool):
+            node_id = int(value[0]) if isinstance(value[0], float) else value[0]
+            slot = value[1]
+            if isinstance(slot, float) and slot.is_integer():
+                slot = int(slot)
+            return [str(node_id), slot]
+        return [_normalize_link_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _normalize_link_value(val) for key, val in value.items()}
+    return value
+
+def normalize_workflow_links(workflow: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure linked inputs reference string node ids for ComfyUI validation."""
+    if not isinstance(workflow, dict):
+        return workflow
+
+    if any(not isinstance(key, str) for key in workflow.keys()):
+        workflow = {str(key): val for key, val in workflow.items()}
+
+    for node in workflow.values():
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict):
+            node["inputs"] = {key: _normalize_link_value(val) for key, val in inputs.items()}
+    return workflow
+
 def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) -> Dict[str, Any]:
     """Apply prompt parameters to the prompt-format workflow."""
+    workflow = normalize_workflow_links(workflow)
     prompt = job_input.get("prompt")
     negative_prompt = job_input.get("negative_prompt")
     width = job_input.get("width")
@@ -1833,6 +1861,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 # Try loading from template file
                 workflow = load_workflow_template(str(workflow_input))
+            workflow = normalize_workflow_links(workflow)
 
             prompt_value = job_input.get("prompt")
             prompt_text = prompt_value.strip() if isinstance(prompt_value, str) else ""
