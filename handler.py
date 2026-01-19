@@ -1383,6 +1383,11 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         lora_name = "ltx-2-19b-distilled-lora-384.safetensors"
         gemma_default = f"{GEMMA_DIRNAME}/model-00001-of-00005.safetensors"
 
+    if (input_image or input_images) and (width is None or height is None):
+        fallback_width, fallback_height = (1024, 576) if use_full else (768, 512)
+        width = fallback_width if width is None else width
+        height = fallback_height if height is None else height
+
     apply_fps = fps is not None or duration_seconds is not None
     if fps is None and duration_seconds is not None:
         fps = 24
