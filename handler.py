@@ -1375,13 +1375,17 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
             inputs["strength_model"] = float(lora_strength)
 
         if class_type == "CLIPTextEncode" and prompt is not None:
-            inputs["text"] = prompt
+            if not isinstance(inputs.get("text"), list):
+                inputs["text"] = prompt
 
         if class_type == "LTXVTextEncode":
             if prompt is not None:
                 inputs["prompt"] = prompt
             if negative_prompt is not None:
                 inputs["negative_prompt"] = negative_prompt
+
+        if class_type == "PrimitiveStringMultiline" and prompt is not None:
+            inputs["value"] = prompt
 
         if class_type == "LTXVConditioning" and apply_fps:
             inputs["frame_rate"] = float(fps)

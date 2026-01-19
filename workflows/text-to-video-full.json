@@ -1,81 +1,9 @@
 {
-  "name": "LTX-2 Text-to-Video (Full)",
-  "description": "LTX-2 full text-to-video workflow using Gemma encoder and two-stage sampling.",
-  "version": "1.0.0",
+  "name": "LTX-2_T2V_Full_wLora",
+  "description": "Converted LTX-2 workflow",
+  "version": 0.4,
   "workflow": {
-    "1": {
-      "class_type": "CheckpointLoaderSimple",
-      "inputs": {
-        "ckpt_name": "ltx-2-19b-dev-fp8.safetensors"
-      }
-    },
-    "2": {
-      "class_type": "LTXVAudioVAELoader",
-      "inputs": {
-        "ckpt_name": "ltx-2-19b-dev-fp8.safetensors"
-      }
-    },
-    "3": {
-      "class_type": "LTXVGemmaCLIPModelLoader",
-      "inputs": {
-        "gemma_path": "gemma-3-12b-it-qat-q4_0-unquantized/model-00001-of-00005.safetensors",
-        "ltxv_path": "ltx-2-19b-dev-fp8.safetensors",
-        "max_length": 1024
-      }
-    },
-    "4": {
-      "class_type": "CLIPTextEncode",
-      "inputs": {
-        "clip": [
-          "3",
-          0
-        ],
-        "text": "A cinematic shot of a mountain ridge at sunrise, slow push-in, soft wind ambience"
-      }
-    },
-    "5": {
-      "class_type": "LTXVConditioning",
-      "inputs": {
-        "positive": [
-          "4",
-          0
-        ],
-        "negative": [
-          "4",
-          0
-        ],
-        "frame_rate": 25
-      }
-    },
-    "6": {
-      "class_type": "LoraLoaderModelOnly",
-      "inputs": {
-        "model": [
-          "1",
-          0
-        ],
-        "lora_name": "ltx-2-19b-distilled-lora-384.safetensors",
-        "strength_model": 0.0
-      }
-    },
-    "7": {
-      "class_type": "LoraLoaderModelOnly",
-      "inputs": {
-        "model": [
-          "1",
-          0
-        ],
-        "lora_name": "ltx-2-19b-distilled-lora-384.safetensors",
-        "strength_model": 0.0
-      }
-    },
-    "8": {
-      "class_type": "LatentUpscaleModelLoader",
-      "inputs": {
-        "model_name": "ltx-2-spatial-upscaler-x2-1.0.safetensors"
-      }
-    },
-    "9": {
+    "5232": {
       "class_type": "EmptyImage",
       "inputs": {
         "width": 1920,
@@ -84,301 +12,438 @@
         "color": 0
       }
     },
-    "10": {
-      "class_type": "ImageScaleBy",
+    "5236": {
+      "class_type": "PrimitiveFloat",
       "inputs": {
-        "image": [
-          "9",
+        "value": 24
+      }
+    },
+    "5220": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {
+        "ckpt_name": "ltx-2-19b-dev.safetensors"
+      }
+    },
+    "5219": {
+      "class_type": "LTXVAudioVAELoader",
+      "inputs": {
+        "ckpt_name": "ltx-2-19b-dev.safetensors"
+      }
+    },
+    "5075": {
+      "class_type": "SaveVideo",
+      "inputs": {
+        "video": [
+          5223,
           0
         ],
-        "upscale_method": "nearest-exact",
-        "scale_by": 0.5
+        "filename_prefix": "auto",
+        "format": "auto"
       }
     },
-    "11": {
-      "class_type": "GetImageSize",
+    "5229": {
+      "class_type": "LTXVConditioning",
       "inputs": {
-        "image": [
-          "10",
-          0
-        ]
-      }
-    },
-    "12": {
-      "class_type": "EmptyLTXVLatentVideo",
-      "inputs": {
-        "width": [
-          "11",
-          0
-        ],
-        "height": [
-          "11",
-          1
-        ],
-        "length": 121,
-        "batch_size": 1
-      }
-    },
-    "13": {
-      "class_type": "LTXVEmptyLatentAudio",
-      "inputs": {
-        "frames_number": 121,
-        "frame_rate": 25,
-        "batch_size": 1,
-        "audio_vae": [
-          "2",
-          0
-        ]
-      }
-    },
-    "14": {
-      "class_type": "LTXVConcatAVLatent",
-      "inputs": {
-        "video_latent": [
-          "12",
-          0
-        ],
-        "audio_latent": [
-          "13",
-          0
-        ]
-      }
-    },
-    "15": {
-      "class_type": "RandomNoise",
-      "inputs": {
-        "noise_seed": 45
-      }
-    },
-    "16": {
-      "class_type": "KSamplerSelect",
-      "inputs": {
-        "sampler_name": "euler"
-      }
-    },
-    "17": {
-      "class_type": "LTXVScheduler",
-      "inputs": {
-        "steps": 25,
-        "max_shift": 2.05,
-        "base_shift": 0.95,
-        "stretch": true,
-        "terminal": 0.1,
-        "latent": [
-          "14",
-          0
-        ]
-      }
-    },
-    "18": {
-      "class_type": "CFGGuider",
-      "inputs": {
-        "model": [
-          "6",
-          0
-        ],
         "positive": [
-          "5",
+          5228,
           0
         ],
         "negative": [
-          "5",
-          1
-        ],
-        "cfg": 4.0
-      }
-    },
-    "19": {
-      "class_type": "SamplerCustomAdvanced",
-      "inputs": {
-        "noise": [
-          "15",
+          5226,
           0
         ],
-        "guider": [
-          "18",
-          0
-        ],
-        "sampler": [
-          "16",
-          0
-        ],
-        "sigmas": [
-          "17",
-          0
-        ],
-        "latent_image": [
-          "14",
+        "frame_rate": [
+          5236,
           0
         ]
       }
     },
-    "20": {
+    "5228": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          5218,
+          0
+        ],
+        "text": [
+          5227,
+          0
+        ]
+      }
+    },
+    "5221": {
+      "class_type": "LoraLoaderModelOnly",
+      "inputs": {
+        "model": [
+          5216,
+          0
+        ],
+        "lora_name": 1
+      }
+    },
+    "5222": {
+      "class_type": "LoraLoaderModelOnly",
+      "inputs": {
+        "model": [
+          5220,
+          0
+        ],
+        "lora_name": 1
+      }
+    },
+    "5226": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          5218,
+          0
+        ],
+        "text": "blurry, low quality, still frame, frames, watermark, overlay, titles, has blurbox, has subtitles"
+      }
+    },
+    "5270": {
+      "class_type": "LatentUpscaleModelLoader",
+      "inputs": {
+        "model_name": "ltx-2-spatial-upscaler-x2-1.0.safetensors"
+      }
+    },
+    "5227": {
+      "class_type": "LTXVGemmaEnhancePrompt",
+      "inputs": {
+        "clip": [
+          5218,
+          0
+        ],
+        "image": "randomize",
+        "prompt": [
+          5225,
+          0
+        ],
+        "system_prompt": 512,
+        "max_tokens": true,
+        "bypass_i2v": 2793143611
+      }
+    },
+    "5225": {
+      "class_type": "PrimitiveStringMultiline",
+      "inputs": {
+        "value": "cinematic drama movie scene shows a closeup of a blonde woman wearing a red sweater hanging out of the open door of a moving train, looking outside and smiling. the camera is fixed to the train's side as the train moves forward on the track. the woman seems excited and says: \" I think we're almost there!\". we hear the train's engine in the background. then, a little boy with brown hair pops his head out of the train along with the woman, looking at her in excitement. he then asks her: \"This is Nana's old village, isn't it?\". she nodes and embraces him joyfully."
+      }
+    },
+    "5233": {
+      "class_type": "PrimitiveInt",
+      "inputs": {
+        "value": 241
+      }
+    },
+    "5223": {
+      "class_type": "CreateVideo",
+      "inputs": {
+        "images": [
+          5293,
+          0
+        ],
+        "audio": [
+          5294,
+          0
+        ],
+        "fps": [
+          5236,
+          0
+        ]
+      }
+    },
+    "5216": {
+      "class_type": "LoraLoaderModelOnly",
+      "inputs": {
+        "model": [
+          5220,
+          0
+        ],
+        "lora_name": 0.6
+      }
+    },
+    "5276": {
       "class_type": "LTXVSeparateAVLatent",
       "inputs": {
         "av_latent": [
-          "19",
+          5282,
           1
         ]
       }
     },
-    "21": {
-      "class_type": "LTXVLatentUpsampler",
+    "5277": {
+      "class_type": "EmptyLTXVLatentVideo",
       "inputs": {
-        "samples": [
-          "20",
+        "width": [
+          5280,
           0
         ],
-        "upscale_model": [
-          "8",
+        "height": [
+          5280,
+          1
+        ],
+        "length": [
+          5233,
           0
         ],
-        "vae": [
-          "1",
-          2
+        "batch_size": 1
+      }
+    },
+    "5278": {
+      "class_type": "ImageScaleBy",
+      "inputs": {
+        "image": [
+          5232,
+          0
+        ],
+        "upscale_method": 0.5
+      }
+    },
+    "5279": {
+      "class_type": "LTXVEmptyLatentAudio",
+      "inputs": {
+        "audio_vae": [
+          5219,
+          0
+        ],
+        "frames_number": [
+          5233,
+          0
+        ],
+        "frame_rate": [
+          5236,
+          0
+        ],
+        "batch_size": 1
+      }
+    },
+    "5280": {
+      "class_type": "GetImageSize",
+      "inputs": {
+        "image": [
+          5278,
+          0
         ]
       }
     },
-    "22": {
+    "5281": {
       "class_type": "LTXVConcatAVLatent",
       "inputs": {
         "video_latent": [
-          "21",
+          5277,
           0
         ],
         "audio_latent": [
-          "20",
+          5279,
+          0
+        ]
+      }
+    },
+    "5282": {
+      "class_type": "SamplerCustomAdvanced",
+      "inputs": {
+        "noise": [
+          5284,
+          0
+        ],
+        "guider": [
+          5283,
+          0
+        ],
+        "sampler": [
+          5287,
+          0
+        ],
+        "sigmas": [
+          5285,
+          0
+        ],
+        "latent_image": [
+          5286,
+          0
+        ]
+      }
+    },
+    "5283": {
+      "class_type": "CFGGuider",
+      "inputs": {
+        "model": [
+          5221,
+          0
+        ],
+        "positive": [
+          5229,
+          0
+        ],
+        "negative": [
+          5229,
           1
         ]
       }
     },
-    "23": {
+    "5284": {
       "class_type": "RandomNoise",
       "inputs": {
         "noise_seed": 420
       }
     },
-    "24": {
-      "class_type": "KSamplerSelect",
-      "inputs": {
-        "sampler_name": "euler"
-      }
-    },
-    "25": {
+    "5285": {
       "class_type": "ManualSigmas",
       "inputs": {
         "sigmas": "0.909375, 0.725, 0.421875, 0.0"
       }
     },
-    "26": {
+    "5286": {
+      "class_type": "LTXVConcatAVLatent",
+      "inputs": {
+        "video_latent": [
+          5296,
+          0
+        ],
+        "audio_latent": [
+          5291,
+          1
+        ]
+      }
+    },
+    "5287": {
+      "class_type": "KSamplerSelect",
+      "inputs": {
+        "sampler_name": "res_2s"
+      }
+    },
+    "5288": {
       "class_type": "CFGGuider",
       "inputs": {
         "model": [
-          "6",
+          5222,
           0
         ],
         "positive": [
-          "5",
+          5229,
           0
         ],
         "negative": [
-          "5",
+          5229,
           1
-        ],
-        "cfg": 1.0
-      }
-    },
-    "27": {
-      "class_type": "SamplerCustomAdvanced",
-      "inputs": {
-        "noise": [
-          "23",
-          0
-        ],
-        "guider": [
-          "26",
-          0
-        ],
-        "sampler": [
-          "24",
-          0
-        ],
-        "sigmas": [
-          "25",
-          0
-        ],
-        "latent_image": [
-          "22",
-          0
         ]
       }
     },
-    "28": {
+    "5289": {
+      "class_type": "LTXVScheduler",
+      "inputs": {
+        "latent": [
+          5281,
+          0
+        ],
+        "steps": 20,
+        "max_shift": 2.05,
+        "base_shift": 0.95,
+        "stretch": true,
+        "terminal": 0.1
+      }
+    },
+    "5290": {
+      "class_type": "KSamplerSelect",
+      "inputs": {
+        "sampler_name": "res_2s"
+      }
+    },
+    "5291": {
       "class_type": "LTXVSeparateAVLatent",
       "inputs": {
         "av_latent": [
-          "27",
+          5292,
           1
         ]
       }
     },
-    "29": {
+    "5292": {
+      "class_type": "SamplerCustomAdvanced",
+      "inputs": {
+        "noise": [
+          5295,
+          0
+        ],
+        "guider": [
+          5288,
+          0
+        ],
+        "sampler": [
+          5290,
+          0
+        ],
+        "sigmas": [
+          5289,
+          0
+        ],
+        "latent_image": [
+          5281,
+          0
+        ]
+      }
+    },
+    "5293": {
       "class_type": "LTXVSpatioTemporalTiledVAEDecode",
       "inputs": {
         "vae": [
-          "1",
+          5220,
           2
         ],
         "latents": [
-          "28",
+          5276,
           0
         ],
-        "spatial_tiles": 4,
+        "spatial_tiles": 16,
         "spatial_overlap": 4,
-        "temporal_tile_length": 16,
-        "temporal_overlap": 4,
-        "last_frame_fix": false,
-        "working_device": "auto",
-        "working_dtype": "auto"
+        "temporal_tile_length": false,
+        "temporal_overlap": "auto",
+        "last_frame_fix": "auto"
       }
     },
-    "30": {
+    "5294": {
       "class_type": "LTXVAudioVAEDecode",
       "inputs": {
         "samples": [
-          "28",
+          5276,
           1
         ],
         "audio_vae": [
-          "2",
+          5219,
           0
         ]
       }
     },
-    "31": {
-      "class_type": "CreateVideo",
+    "5295": {
+      "class_type": "RandomNoise",
       "inputs": {
-        "images": [
-          "29",
+        "noise_seed": 43
+      }
+    },
+    "5296": {
+      "class_type": "LTXVLatentUpsampler",
+      "inputs": {
+        "samples": [
+          5291,
           0
         ],
-        "fps": 24,
-        "audio": [
-          "30",
+        "upscale_model": [
+          5270,
           0
+        ],
+        "vae": [
+          5220,
+          2
         ]
       }
     },
-    "32": {
-      "class_type": "SaveVideo",
+    "5218": {
+      "class_type": "LTXVGemmaCLIPModelLoader",
       "inputs": {
-        "video": [
-          "31",
-          0
-        ],
-        "filename_prefix": "video/LTX-2",
-        "format": "auto",
-        "codec": "auto"
+        "gemma_path": "gemma-3-12b-it-qat-q4_0-unquantized/model-00001-of-00005.safetensors",
+        "ltxv_path": "ltx-2-19b-dev.safetensors",
+        "max_length": 1024
       }
     }
   }

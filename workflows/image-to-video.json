@@ -1,411 +1,483 @@
 {
-  "name": "LTX-2 Image-to-Video",
-  "description": "LTX-2 distilled I2V prompt workflow (image-conditioned).",
-  "version": 1,
+  "name": "LTX-2_I2V_Distilled_wLora",
+  "description": "Converted LTX-2 workflow",
+  "version": 0.4,
   "workflow": {
-    "1": {
+    "5185": {
+      "class_type": "EmptyImage",
+      "inputs": {
+        "width": 1920,
+        "height": 1088,
+        "batch_size": 1,
+        "color": 0
+      }
+    },
+    "5186": {
+      "class_type": "PrimitiveInt",
+      "inputs": {
+        "value": 121
+      }
+    },
+    "5190": {
+      "class_type": "CreateVideo",
+      "inputs": {
+        "images": [
+          5230,
+          0
+        ],
+        "audio": [
+          5229,
+          0
+        ],
+        "fps": [
+          5184,
+          0
+        ]
+      }
+    },
+    "4958": {
+      "class_type": "SaveVideo",
+      "inputs": {
+        "video": [
+          5190,
+          0
+        ],
+        "filename_prefix": "auto",
+        "format": "auto"
+      }
+    },
+    "5184": {
+      "class_type": "PrimitiveFloat",
+      "inputs": {
+        "value": 24
+      }
+    },
+    "5176": {
       "class_type": "CheckpointLoaderSimple",
       "inputs": {
-        "ckpt_name": "ltx-2-19b-distilled-fp8.safetensors"
+        "ckpt_name": "ltx-2-19b-distilled.safetensors"
       }
     },
-    "2": {
+    "5188": {
       "class_type": "LTXVAudioVAELoader",
       "inputs": {
-        "ckpt_name": "ltx-2-19b-distilled-fp8.safetensors"
+        "ckpt_name": "ltx-2-19b-distilled.safetensors"
       }
     },
-    "3": {
-      "class_type": "LTXVGemmaCLIPModelLoader",
+    "5182": {
+      "class_type": "LoraLoaderModelOnly",
       "inputs": {
-        "gemma_path": "gemma-3-12b-it-qat-q4_0-unquantized/model-00001-of-00005.safetensors",
-        "ltxv_path": "ltx-2-19b-distilled-fp8.safetensors",
-        "max_length": 1024
+        "model": [
+          5176,
+          0
+        ],
+        "lora_name": 1
       }
     },
-    "4": {
+    "5183": {
+      "class_type": "LoraLoaderModelOnly",
+      "inputs": {
+        "model": [
+          5176,
+          0
+        ],
+        "lora_name": 1
+      }
+    },
+    "5174": {
       "class_type": "CLIPTextEncode",
       "inputs": {
         "clip": [
-          "3",
+          5178,
           0
         ],
-        "text": "A cinematic shot of a mountain ridge at sunrise, slow push-in, soft wind ambience"
+        "text": [
+          5192,
+          0
+        ]
       }
     },
-    "5": {
+    "5173": {
       "class_type": "LTXVConditioning",
       "inputs": {
         "positive": [
-          "4",
+          5174,
           0
         ],
         "negative": [
-          "4",
+          5174,
           0
         ],
-        "frame_rate": 25
-      }
-    },
-    "6": {
-      "class_type": "LoraLoaderModelOnly",
-      "inputs": {
-        "model": [
-          "1",
+        "frame_rate": [
+          5184,
           0
-        ],
-        "lora_name": "ltx-2-19b-distilled-lora-384.safetensors",
-        "strength_model": 1.0
+        ]
       }
     },
-    "7": {
-      "class_type": "LoraLoaderModelOnly",
-      "inputs": {
-        "model": [
-          "1",
-          0
-        ],
-        "lora_name": "ltx-2-19b-distilled-lora-384.safetensors",
-        "strength_model": 1.0
-      }
-    },
-    "8": {
+    "5210": {
       "class_type": "LatentUpscaleModelLoader",
       "inputs": {
         "model_name": "ltx-2-spatial-upscaler-x2-1.0.safetensors"
       }
     },
-    "9": {
+    "5192": {
+      "class_type": "LTXVGemmaEnhancePrompt",
+      "inputs": {
+        "clip": [
+          5178,
+          0
+        ],
+        "image": [
+          5180,
+          0
+        ],
+        "prompt": [
+          5175,
+          0
+        ],
+        "system_prompt": 512,
+        "max_tokens": false,
+        "bypass_i2v": 42
+      }
+    },
+    "5178": {
+      "class_type": "LTXVGemmaCLIPModelLoader",
+      "inputs": {
+        "gemma_path": "gemma-3-12b-it-qat-q4_0-unquantized/model-00001-of-00005.safetensors",
+        "ltxv_path": "ltx-2-19b-distilled.safetensors",
+        "max_length": 1024
+      }
+    },
+    "5175": {
+      "class_type": "PrimitiveStringMultiline",
+      "inputs": {
+        "value": "a 3d animated movie scene shows the wise elderly owl on the left saying to a baby owl to his right, with a raspy deep voice: \"focus, close your eyes, and flap!\". we then see the little owl jump off the branch screaming in fear and disappear. the the elder owl remains standing on the branch with a disappointed face. the camera remains static in place"
+      }
+    },
+    "5180": {
       "class_type": "LoadImage",
       "inputs": {
-        "image": "input.png"
+        "image": "distilled image.png"
       }
     },
-    "10": {
-      "class_type": "ImageScaleBy",
+    "5215": {
+      "class_type": "LTXVSeparateAVLatent",
       "inputs": {
-        "image": [
-          "9",
-          0
-        ],
-        "upscale_method": "nearest-exact",
-        "scale_by": 0.5
-      }
-    },
-    "11": {
-      "class_type": "GetImageSize",
-      "inputs": {
-        "image": [
-          "10",
-          0
-        ]
-      }
-    },
-    "12": {
-      "class_type": "EmptyLTXVLatentVideo",
-      "inputs": {
-        "width": [
-          "11",
-          0
-        ],
-        "height": [
-          "11",
+        "av_latent": [
+          5217,
           1
-        ],
-        "length": 121,
-        "batch_size": 1
-      }
-    },
-    "13": {
-      "class_type": "LTXVEmptyLatentAudio",
-      "inputs": {
-        "frames_number": 121,
-        "frame_rate": 25,
-        "batch_size": 1,
-        "audio_vae": [
-          "2",
-          0
         ]
       }
     },
-    "14": {
+    "5216": {
       "class_type": "LTXVConcatAVLatent",
       "inputs": {
         "video_latent": [
-          "33",
+          5238,
           0
         ],
         "audio_latent": [
-          "13",
+          5226,
           0
         ]
       }
     },
-    "15": {
-      "class_type": "RandomNoise",
+    "5217": {
+      "class_type": "SamplerCustomAdvanced",
       "inputs": {
-        "noise_seed": 45
+        "noise": [
+          5240,
+          0
+        ],
+        "guider": [
+          5225,
+          0
+        ],
+        "sampler": [
+          5224,
+          0
+        ],
+        "sigmas": [
+          5218,
+          0
+        ],
+        "latent_image": [
+          5216,
+          0
+        ]
       }
     },
-    "16": {
-      "class_type": "KSamplerSelect",
-      "inputs": {
-        "sampler_name": "euler"
-      }
-    },
-    "17": {
+    "5218": {
       "class_type": "ManualSigmas",
       "inputs": {
         "sigmas": "1., 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
       }
     },
-    "18": {
-      "class_type": "CFGGuider",
-      "inputs": {
-        "model": [
-          "6",
-          0
-        ],
-        "positive": [
-          "5",
-          0
-        ],
-        "negative": [
-          "5",
-          1
-        ],
-        "cfg": 1.0
-      }
-    },
-    "19": {
+    "5219": {
       "class_type": "SamplerCustomAdvanced",
       "inputs": {
         "noise": [
-          "15",
+          5220,
           0
         ],
         "guider": [
-          "18",
+          5222,
           0
         ],
         "sampler": [
-          "16",
+          5221,
           0
         ],
         "sigmas": [
-          "17",
+          5223,
           0
         ],
         "latent_image": [
-          "14",
+          5235,
           0
         ]
       }
     },
-    "20": {
-      "class_type": "LTXVSeparateAVLatent",
-      "inputs": {
-        "av_latent": [
-          "19",
-          1
-        ]
-      }
-    },
-    "21": {
-      "class_type": "LTXVLatentUpsampler",
-      "inputs": {
-        "samples": [
-          "20",
-          0
-        ],
-        "upscale_model": [
-          "8",
-          0
-        ],
-        "vae": [
-          "1",
-          2
-        ]
-      }
-    },
-    "22": {
-      "class_type": "LTXVConcatAVLatent",
-      "inputs": {
-        "video_latent": [
-          "34",
-          0
-        ],
-        "audio_latent": [
-          "20",
-          1
-        ]
-      }
-    },
-    "23": {
+    "5220": {
       "class_type": "RandomNoise",
       "inputs": {
         "noise_seed": 420
       }
     },
-    "24": {
+    "5221": {
       "class_type": "KSamplerSelect",
       "inputs": {
         "sampler_name": "euler"
       }
     },
-    "25": {
+    "5222": {
+      "class_type": "CFGGuider",
+      "inputs": {
+        "model": [
+          5183,
+          0
+        ],
+        "positive": [
+          5173,
+          0
+        ],
+        "negative": [
+          5173,
+          1
+        ]
+      }
+    },
+    "5223": {
       "class_type": "ManualSigmas",
       "inputs": {
         "sigmas": "0.909375, 0.725, 0.421875, 0.0"
       }
     },
-    "26": {
+    "5224": {
+      "class_type": "KSamplerSelect",
+      "inputs": {
+        "sampler_name": "euler"
+      }
+    },
+    "5225": {
       "class_type": "CFGGuider",
       "inputs": {
         "model": [
-          "7",
+          5182,
           0
         ],
         "positive": [
-          "5",
+          5173,
           0
         ],
         "negative": [
-          "5",
+          5173,
           1
-        ],
-        "cfg": 1.0
+        ]
       }
     },
-    "27": {
-      "class_type": "SamplerCustomAdvanced",
+    "5226": {
+      "class_type": "LTXVEmptyLatentAudio",
       "inputs": {
-        "noise": [
-          "23",
+        "audio_vae": [
+          5188,
           0
         ],
-        "guider": [
-          "26",
+        "frames_number": [
+          5186,
           0
         ],
-        "sampler": [
-          "24",
+        "frame_rate": [
+          5184,
           0
         ],
-        "sigmas": [
-          "25",
-          0
-        ],
-        "latent_image": [
-          "22",
+        "batch_size": 1
+      }
+    },
+    "5227": {
+      "class_type": "GetImageSize",
+      "inputs": {
+        "image": [
+          5234,
           0
         ]
       }
     },
-    "28": {
+    "5228": {
       "class_type": "LTXVSeparateAVLatent",
       "inputs": {
         "av_latent": [
-          "27",
+          5219,
           1
         ]
       }
     },
-    "29": {
-      "class_type": "LTXVSpatioTemporalTiledVAEDecode",
-      "inputs": {
-        "vae": [
-          "1",
-          2
-        ],
-        "latents": [
-          "28",
-          0
-        ],
-        "spatial_tiles": 4,
-        "spatial_overlap": 4,
-        "temporal_tile_length": 16,
-        "temporal_overlap": 4,
-        "last_frame_fix": false,
-        "working_device": "auto",
-        "working_dtype": "auto"
-      }
-    },
-    "30": {
+    "5229": {
       "class_type": "LTXVAudioVAEDecode",
       "inputs": {
         "samples": [
-          "28",
+          5228,
           1
         ],
         "audio_vae": [
-          "2",
+          5188,
           0
         ]
       }
     },
-    "31": {
-      "class_type": "CreateVideo",
+    "5230": {
+      "class_type": "LTXVSpatioTemporalTiledVAEDecode",
+      "inputs": {
+        "vae": [
+          5176,
+          2
+        ],
+        "latents": [
+          5228,
+          0
+        ],
+        "spatial_tiles": 16,
+        "spatial_overlap": 4,
+        "temporal_tile_length": false,
+        "temporal_overlap": "auto",
+        "last_frame_fix": "auto"
+      }
+    },
+    "5231": {
+      "class_type": "EmptyLTXVLatentVideo",
+      "inputs": {
+        "width": [
+          5227,
+          0
+        ],
+        "height": [
+          5227,
+          1
+        ],
+        "length": [
+          5186,
+          0
+        ],
+        "batch_size": 1
+      }
+    },
+    "5232": {
+      "class_type": "ResizeImagesByLongerEdge",
       "inputs": {
         "images": [
-          "29",
-          0
-        ],
-        "fps": 24,
-        "audio": [
-          "30",
+          5180,
           0
         ]
       }
     },
-    "32": {
-      "class_type": "SaveVideo",
+    "5233": {
+      "class_type": "LTXVPreprocess",
       "inputs": {
-        "video": [
-          "31",
+        "image": [
+          5232,
           0
-        ],
-        "filename_prefix": "video/LTX-2",
-        "format": "auto",
-        "codec": "auto"
+        ]
       }
     },
-    "33": {
+    "5234": {
+      "class_type": "ImageScaleBy",
+      "inputs": {
+        "image": [
+          5185,
+          0
+        ],
+        "upscale_method": 0.5
+      }
+    },
+    "5235": {
+      "class_type": "LTXVConcatAVLatent",
+      "inputs": {
+        "video_latent": [
+          5236,
+          0
+        ],
+        "audio_latent": [
+          5215,
+          1
+        ]
+      }
+    },
+    "5236": {
       "class_type": "LTXVImgToVideoInplace",
       "inputs": {
         "vae": [
-          "1",
+          5176,
           2
         ],
         "image": [
-          "9",
+          5232,
           0
         ],
         "latent": [
-          "12",
+          5237,
           0
-        ],
-        "strength": 0.6,
-        "bypass": false
+        ]
       }
     },
-    "34": {
+    "5237": {
+      "class_type": "LTXVLatentUpsampler",
+      "inputs": {
+        "samples": [
+          5215,
+          0
+        ],
+        "upscale_model": [
+          5210,
+          0
+        ],
+        "vae": [
+          5176,
+          2
+        ]
+      }
+    },
+    "5238": {
       "class_type": "LTXVImgToVideoInplace",
       "inputs": {
         "vae": [
-          "1",
+          5176,
           2
         ],
         "image": [
-          "9",
+          5233,
           0
         ],
         "latent": [
-          "21",
+          5231,
           0
         ],
-        "strength": 0.6,
-        "bypass": false
+        "strength": 0.6
+      }
+    },
+    "5240": {
+      "class_type": "RandomNoise",
+      "inputs": {
+        "noise_seed": 42
       }
     }
   }
