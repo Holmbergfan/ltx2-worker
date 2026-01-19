@@ -1,8 +1,351 @@
 {
   "name": "LTX-2_I2V_Distilled_wLora",
   "description": "Converted LTX-2 workflow",
-  "version": 0.4,
+  "version": 0.6,
   "workflow": {
+    "5215": {
+      "class_type": "LTXVSeparateAVLatent",
+      "inputs": {
+        "av_latent": [
+          "5217",
+          1
+        ]
+      }
+    },
+    "5216": {
+      "class_type": "LTXVConcatAVLatent",
+      "inputs": {
+        "video_latent": [
+          "5238",
+          0
+        ],
+        "audio_latent": [
+          "5226",
+          0
+        ]
+      }
+    },
+    "5217": {
+      "class_type": "SamplerCustomAdvanced",
+      "inputs": {
+        "noise": [
+          "5240",
+          0
+        ],
+        "guider": [
+          "5225",
+          0
+        ],
+        "sampler": [
+          "5224",
+          0
+        ],
+        "sigmas": [
+          "5218",
+          0
+        ],
+        "latent_image": [
+          "5216",
+          0
+        ]
+      }
+    },
+    "5218": {
+      "class_type": "ManualSigmas",
+      "inputs": {
+        "sigmas": "1., 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+      }
+    },
+    "5219": {
+      "class_type": "SamplerCustomAdvanced",
+      "inputs": {
+        "noise": [
+          "5220",
+          0
+        ],
+        "guider": [
+          "5222",
+          0
+        ],
+        "sampler": [
+          "5221",
+          0
+        ],
+        "sigmas": [
+          "5223",
+          0
+        ],
+        "latent_image": [
+          "5235",
+          0
+        ]
+      }
+    },
+    "5220": {
+      "class_type": "RandomNoise",
+      "inputs": {
+        "noise_seed": 420
+      }
+    },
+    "5221": {
+      "class_type": "KSamplerSelect",
+      "inputs": {
+        "sampler_name": "euler"
+      }
+    },
+    "5222": {
+      "class_type": "CFGGuider",
+      "inputs": {
+        "model": [
+          "5183",
+          0
+        ],
+        "positive": [
+          "5239",
+          0
+        ],
+        "negative": [
+          "5173",
+          1
+        ],
+        "cfg": 1
+      }
+    },
+    "5223": {
+      "class_type": "ManualSigmas",
+      "inputs": {
+        "sigmas": "0.909375, 0.725, 0.421875, 0.0"
+      }
+    },
+    "5224": {
+      "class_type": "KSamplerSelect",
+      "inputs": {
+        "sampler_name": "euler"
+      }
+    },
+    "5225": {
+      "class_type": "CFGGuider",
+      "inputs": {
+        "model": [
+          "5182",
+          0
+        ],
+        "positive": [
+          "5239",
+          0
+        ],
+        "negative": [
+          "5173",
+          1
+        ],
+        "cfg": 1
+      }
+    },
+    "5226": {
+      "class_type": "LTXVEmptyLatentAudio",
+      "inputs": {
+        "audio_vae": [
+          "5188",
+          0
+        ],
+        "frames_number": [
+          "5186",
+          0
+        ],
+        "frame_rate": [
+          "5196",
+          0
+        ],
+        "batch_size": 1
+      }
+    },
+    "5227": {
+      "class_type": "GetImageSize",
+      "inputs": {
+        "image": [
+          "5234",
+          0
+        ]
+      }
+    },
+    "5228": {
+      "class_type": "LTXVSeparateAVLatent",
+      "inputs": {
+        "av_latent": [
+          "5219",
+          1
+        ]
+      }
+    },
+    "5229": {
+      "class_type": "LTXVAudioVAEDecode",
+      "inputs": {
+        "samples": [
+          "5228",
+          1
+        ],
+        "audio_vae": [
+          "5188",
+          0
+        ]
+      }
+    },
+    "5230": {
+      "class_type": "LTXVSpatioTemporalTiledVAEDecode",
+      "inputs": {
+        "vae": [
+          "5176",
+          2
+        ],
+        "latents": [
+          "5228",
+          0
+        ],
+        "spatial_tiles": 4,
+        "spatial_overlap": 4,
+        "temporal_tile_length": 16,
+        "temporal_overlap": 4,
+        "last_frame_fix": false,
+        "working_device": "auto",
+        "working_dtype": "auto"
+      }
+    },
+    "5231": {
+      "class_type": "EmptyLTXVLatentVideo",
+      "inputs": {
+        "width": [
+          "5227",
+          0
+        ],
+        "height": [
+          "5227",
+          1
+        ],
+        "length": [
+          "5186",
+          0
+        ],
+        "batch_size": 1
+      }
+    },
+    "5232": {
+      "class_type": "ResizeImagesByLongerEdge",
+      "inputs": {
+        "images": [
+          "5239",
+          1
+        ],
+        "longer_edge": 1536
+      }
+    },
+    "5233": {
+      "class_type": "LTXVPreprocess",
+      "inputs": {
+        "image": [
+          "5232",
+          0
+        ],
+        "img_compression": 33
+      }
+    },
+    "5234": {
+      "class_type": "ImageScaleBy",
+      "inputs": {
+        "image": [
+          "5185",
+          0
+        ],
+        "upscale_method": "bicubic",
+        "scale_by": 0.5
+      }
+    },
+    "5235": {
+      "class_type": "LTXVConcatAVLatent",
+      "inputs": {
+        "video_latent": [
+          "5236",
+          0
+        ],
+        "audio_latent": [
+          "5215",
+          1
+        ]
+      }
+    },
+    "5236": {
+      "class_type": "LTXVImgToVideoInplace",
+      "inputs": {
+        "vae": [
+          "5176",
+          2
+        ],
+        "image": [
+          "5232",
+          0
+        ],
+        "latent": [
+          "5237",
+          0
+        ],
+        "strength": 1,
+        "bypass": false
+      }
+    },
+    "5237": {
+      "class_type": "LTXVLatentUpsampler",
+      "inputs": {
+        "samples": [
+          "5215",
+          0
+        ],
+        "upscale_model": [
+          "5210",
+          0
+        ],
+        "vae": [
+          "5176",
+          2
+        ]
+      }
+    },
+    "5238": {
+      "class_type": "LTXVImgToVideoInplace",
+      "inputs": {
+        "vae": [
+          "5176",
+          2
+        ],
+        "image": [
+          "5233",
+          0
+        ],
+        "latent": [
+          "5231",
+          0
+        ],
+        "strength": 0.6,
+        "bypass": false
+      }
+    },
+    "5239": {
+      "class_type": "ImpactExecutionOrderController",
+      "inputs": {
+        "signal": [
+          "5173",
+          0
+        ],
+        "value": [
+          "5180",
+          0
+        ]
+      }
+    },
+    "5240": {
+      "class_type": "RandomNoise",
+      "inputs": {
+        "noise_seed": 42
+      }
+    },
     "5185": {
       "class_type": "EmptyImage",
       "inputs": {
@@ -18,19 +361,28 @@
         "value": 121
       }
     },
+    "5196": {
+      "class_type": "CM_FloatToInt",
+      "inputs": {
+        "a": [
+          "5184",
+          0
+        ]
+      }
+    },
     "5190": {
       "class_type": "CreateVideo",
       "inputs": {
         "images": [
-          5230,
+          "5230",
           0
         ],
         "audio": [
-          5229,
+          "5229",
           0
         ],
         "fps": [
-          5184,
+          "5184",
           0
         ]
       }
@@ -39,11 +391,12 @@
       "class_type": "SaveVideo",
       "inputs": {
         "video": [
-          5190,
+          "5190",
           0
         ],
-        "filename_prefix": "auto",
-        "format": "auto"
+        "filename_prefix": "video/LTX-2",
+        "format": "auto",
+        "codec": "auto"
       }
     },
     "5184": {
@@ -68,31 +421,33 @@
       "class_type": "LoraLoaderModelOnly",
       "inputs": {
         "model": [
-          5176,
+          "5176",
           0
         ],
-        "lora_name": 1
+        "lora_name": "your_camera_lora.safetensors",
+        "strength_model": 1
       }
     },
     "5183": {
       "class_type": "LoraLoaderModelOnly",
       "inputs": {
         "model": [
-          5176,
+          "5176",
           0
         ],
-        "lora_name": 1
+        "lora_name": "your_camera_lora.safetensors",
+        "strength_model": 1
       }
     },
     "5174": {
       "class_type": "CLIPTextEncode",
       "inputs": {
         "clip": [
-          5178,
+          "5178",
           0
         ],
         "text": [
-          5192,
+          "5192",
           0
         ]
       }
@@ -101,15 +456,15 @@
       "class_type": "LTXVConditioning",
       "inputs": {
         "positive": [
-          5174,
+          "5174",
           0
         ],
         "negative": [
-          5174,
+          "5174",
           0
         ],
         "frame_rate": [
-          5184,
+          "5184",
           0
         ]
       }
@@ -120,24 +475,33 @@
         "model_name": "ltx-2-spatial-upscaler-x2-1.0.safetensors"
       }
     },
+    "5213": {
+      "class_type": "MarkdownNote",
+      "inputs": {}
+    },
+    "5214": {
+      "class_type": "MarkdownNote",
+      "inputs": {}
+    },
     "5192": {
       "class_type": "LTXVGemmaEnhancePrompt",
       "inputs": {
         "clip": [
-          5178,
+          "5178",
           0
         ],
         "image": [
-          5180,
+          "5180",
           0
         ],
         "prompt": [
-          5175,
+          "5175",
           0
         ],
-        "system_prompt": 512,
-        "max_tokens": false,
-        "bypass_i2v": 42
+        "system_prompt": "You are a Creative Assistant writing concise, action-focused image-to-video prompts. Given an image (first frame) and user Raw Input Prompt, generate a prompt to guide video generation from that image.\n\n#### Guidelines:\n- Analyze the Image: Identify Subject, Setting, Elements, Style and Mood.\n- Follow user Raw Input Prompt: Include all requested motion, actions, camera movements, audio, and details. If in conflict with the image, prioritize user request while maintaining visual consistency (describe transition from image to user's scene).\n- Describe only changes from the image: Don't reiterate established visual details. Inaccurate descriptions may cause scene cuts.\n- Active language: Use present-progressive verbs (\"is walking,\" \"speaking\"). If no action specified, describe natural movements.\n- Chronological flow: Use temporal connectors (\"as,\" \"then,\" \"while\").\n- Audio layer: Describe complete soundscape throughout the prompt alongside actions\u2014NOT at the end. Align audio intensity with action tempo. Include natural background audio, ambient sounds, effects, speech or music (when requested). Be specific (e.g., \"soft footsteps on tile\") not vague (e.g., \"ambient sound\").\n- Speech (only when requested): Provide exact words in quotes with character's visual/voice characteristics (e.g., \"The tall man speaks in a low, gravelly voice\"), language if not English and accent if relevant. If general conversation mentioned without text, generate contextual quoted dialogue. (i.e., \"The man is talking\" input -> the output should include exact spoken words, like: \"The man is talking in an excited voice saying: 'You won't believe what I just saw!' His hands gesture expressively as he speaks, eyebrows raised with enthusiasm. The ambient sound of a quiet room underscores his animated speech.\")\n- Style: Include visual style at beginning: \"Style: <style>, <rest of prompt>.\" If unclear, omit to avoid conflicts.\n- Visual and audio only: Describe only what is seen and heard. NO smell, taste, or tactile sensations.\n- Restrained language: Avoid dramatic terms. Use mild, natural, understated phrasing.\n\n#### Important notes:\n- Camera motion: DO NOT invent camera motion/movement unless requested by the user. Make sure to include camera motion only if specified in the input.\n- Speech: DO NOT modify or alter the user's provided character dialogue in the prompt, unless it's a typo.\n- No timestamps or cuts: DO NOT use timestamps or describe scene cuts unless explicitly requested.\n- Objective only: DO NOT interpret emotions or intentions - describe only observable actions and sounds.\n- Format: DO NOT use phrases like \"The scene opens with...\" / \"The video starts...\". Start directly with Style (optional) and chronological scene description.\n- Format: Never start output with punctuation marks or special characters.\n- DO NOT invent dialogue unless the user mentions speech/talking/singing/conversation.\n- Your performance is CRITICAL. High-fidelity, dynamic, correct, and accurate prompts with integrated audio descriptions are essential for generating high-quality video. Your goal is flawless execution of these rules.\n\n#### Output Format (Strict):\n- Single concise paragraph in natural English. NO titles, headings, prefaces, sections, code fences, or Markdown.\n- If unsafe/invalid, return original user prompt. Never ask questions or clarifications.\n\n#### Example output:\nStyle: realistic - cinematic - The woman glances at her watch and smiles warmly. She speaks in a cheerful, friendly voice, \"I think we're right on time!\" In the background, a caf\u00e9 barista prepares drinks at the counter. The barista calls out in a clear, upbeat tone, \"Two cappuccinos ready!\" The sound of the espresso machine hissing softly blends with gentle background chatter and the light clinking of cups on saucers.",
+        "max_tokens": 512,
+        "bypass_i2v": false,
+        "seed": 42
       }
     },
     "5178": {
@@ -157,328 +521,16 @@
     "5180": {
       "class_type": "LoadImage",
       "inputs": {
-        "image": "distilled image.png"
+        "image": "1764018029794-IMG_4361.jpeg"
       }
     },
-    "5215": {
-      "class_type": "LTXVSeparateAVLatent",
-      "inputs": {
-        "av_latent": [
-          5217,
-          1
-        ]
-      }
+    "5211": {
+      "class_type": "MarkdownNote",
+      "inputs": {}
     },
-    "5216": {
-      "class_type": "LTXVConcatAVLatent",
-      "inputs": {
-        "video_latent": [
-          5238,
-          0
-        ],
-        "audio_latent": [
-          5226,
-          0
-        ]
-      }
-    },
-    "5217": {
-      "class_type": "SamplerCustomAdvanced",
-      "inputs": {
-        "noise": [
-          5240,
-          0
-        ],
-        "guider": [
-          5225,
-          0
-        ],
-        "sampler": [
-          5224,
-          0
-        ],
-        "sigmas": [
-          5218,
-          0
-        ],
-        "latent_image": [
-          5216,
-          0
-        ]
-      }
-    },
-    "5218": {
-      "class_type": "ManualSigmas",
-      "inputs": {
-        "sigmas": "1., 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
-      }
-    },
-    "5219": {
-      "class_type": "SamplerCustomAdvanced",
-      "inputs": {
-        "noise": [
-          5220,
-          0
-        ],
-        "guider": [
-          5222,
-          0
-        ],
-        "sampler": [
-          5221,
-          0
-        ],
-        "sigmas": [
-          5223,
-          0
-        ],
-        "latent_image": [
-          5235,
-          0
-        ]
-      }
-    },
-    "5220": {
-      "class_type": "RandomNoise",
-      "inputs": {
-        "noise_seed": 420
-      }
-    },
-    "5221": {
-      "class_type": "KSamplerSelect",
-      "inputs": {
-        "sampler_name": "euler"
-      }
-    },
-    "5222": {
-      "class_type": "CFGGuider",
-      "inputs": {
-        "model": [
-          5183,
-          0
-        ],
-        "positive": [
-          5173,
-          0
-        ],
-        "negative": [
-          5173,
-          1
-        ]
-      }
-    },
-    "5223": {
-      "class_type": "ManualSigmas",
-      "inputs": {
-        "sigmas": "0.909375, 0.725, 0.421875, 0.0"
-      }
-    },
-    "5224": {
-      "class_type": "KSamplerSelect",
-      "inputs": {
-        "sampler_name": "euler"
-      }
-    },
-    "5225": {
-      "class_type": "CFGGuider",
-      "inputs": {
-        "model": [
-          5182,
-          0
-        ],
-        "positive": [
-          5173,
-          0
-        ],
-        "negative": [
-          5173,
-          1
-        ]
-      }
-    },
-    "5226": {
-      "class_type": "LTXVEmptyLatentAudio",
-      "inputs": {
-        "audio_vae": [
-          5188,
-          0
-        ],
-        "frames_number": [
-          5186,
-          0
-        ],
-        "frame_rate": [
-          5184,
-          0
-        ],
-        "batch_size": 1
-      }
-    },
-    "5227": {
-      "class_type": "GetImageSize",
-      "inputs": {
-        "image": [
-          5234,
-          0
-        ]
-      }
-    },
-    "5228": {
-      "class_type": "LTXVSeparateAVLatent",
-      "inputs": {
-        "av_latent": [
-          5219,
-          1
-        ]
-      }
-    },
-    "5229": {
-      "class_type": "LTXVAudioVAEDecode",
-      "inputs": {
-        "samples": [
-          5228,
-          1
-        ],
-        "audio_vae": [
-          5188,
-          0
-        ]
-      }
-    },
-    "5230": {
-      "class_type": "LTXVSpatioTemporalTiledVAEDecode",
-      "inputs": {
-        "vae": [
-          5176,
-          2
-        ],
-        "latents": [
-          5228,
-          0
-        ],
-        "spatial_tiles": 16,
-        "spatial_overlap": 4,
-        "temporal_tile_length": false,
-        "temporal_overlap": "auto",
-        "last_frame_fix": "auto"
-      }
-    },
-    "5231": {
-      "class_type": "EmptyLTXVLatentVideo",
-      "inputs": {
-        "width": [
-          5227,
-          0
-        ],
-        "height": [
-          5227,
-          1
-        ],
-        "length": [
-          5186,
-          0
-        ],
-        "batch_size": 1
-      }
-    },
-    "5232": {
-      "class_type": "ResizeImagesByLongerEdge",
-      "inputs": {
-        "images": [
-          5180,
-          0
-        ]
-      }
-    },
-    "5233": {
-      "class_type": "LTXVPreprocess",
-      "inputs": {
-        "image": [
-          5232,
-          0
-        ]
-      }
-    },
-    "5234": {
-      "class_type": "ImageScaleBy",
-      "inputs": {
-        "image": [
-          5185,
-          0
-        ],
-        "upscale_method": 0.5
-      }
-    },
-    "5235": {
-      "class_type": "LTXVConcatAVLatent",
-      "inputs": {
-        "video_latent": [
-          5236,
-          0
-        ],
-        "audio_latent": [
-          5215,
-          1
-        ]
-      }
-    },
-    "5236": {
-      "class_type": "LTXVImgToVideoInplace",
-      "inputs": {
-        "vae": [
-          5176,
-          2
-        ],
-        "image": [
-          5232,
-          0
-        ],
-        "latent": [
-          5237,
-          0
-        ]
-      }
-    },
-    "5237": {
-      "class_type": "LTXVLatentUpsampler",
-      "inputs": {
-        "samples": [
-          5215,
-          0
-        ],
-        "upscale_model": [
-          5210,
-          0
-        ],
-        "vae": [
-          5176,
-          2
-        ]
-      }
-    },
-    "5238": {
-      "class_type": "LTXVImgToVideoInplace",
-      "inputs": {
-        "vae": [
-          5176,
-          2
-        ],
-        "image": [
-          5233,
-          0
-        ],
-        "latent": [
-          5231,
-          0
-        ],
-        "strength": 0.6
-      }
-    },
-    "5240": {
-      "class_type": "RandomNoise",
-      "inputs": {
-        "noise_seed": 42
-      }
+    "5212": {
+      "class_type": "MarkdownNote",
+      "inputs": {}
     }
   }
 }
