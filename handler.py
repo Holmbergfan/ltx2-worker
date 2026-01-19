@@ -74,6 +74,8 @@ MODEL_DIR = os.environ.get("MODEL_DIR", f"{DEFAULT_ROOT}/models")
 COMFY_HOME = os.environ.get("COMFY_HOME", f"{DEFAULT_ROOT}/ComfyUI")
 TMPDIR = os.environ.get("TMPDIR", f"{DEFAULT_ROOT}/tmp")
 AUTO_SEED = os.getenv("AUTO_SEED", "true").lower() == "true"
+SETUP_ONCE = os.getenv("LTX2_SETUP_ONCE", "true").lower() in ("1", "true", "yes")
+SETUP_COMPLETE = False
 
 # Only fall back to /workspace if /runpod-volume is NOT available at all
 if not os.path.ismount("/runpod-volume") and not os.path.exists("/runpod-volume"):
@@ -1115,15 +1117,28 @@ def download_models(force: bool = False):
 
 def setup_environment(preload_models: bool = False):
     """Full setup on first run"""
-    log("Setting up LTX-2 environment on network volume...", level="INFO")
+    global SETUP_COMPLETE
 
+    log("Setting up LTX-2 environment on network volume...", level="INFO")
     ensure_directories()
-    install_comfyui()
+
+    if SETUP_ONCE and SETUP_COMPLETE and os.path.exists(f"{COMFY_HOME}/main.py"):
+        log("Setup already complete; skipping install steps.", level="INFO")
+        ensure_comfy_model_links()
+        if preload_models:
+            download_models()
+        return
+
+    if not install_comfyui():
+        log("Setup incomplete: ComfyUI install failed.", level="ERROR")
+        return
     ensure_custom_nodes()  # Ensure LTX-Video nodes are installed
     ensure_comfy_model_links()
     if preload_models:
         download_models()
 
+    if SETUP_ONCE:
+        SETUP_COMPLETE = True
     log("Setup complete!", level="INFO")
 
 # =============================================================================
@@ -1742,6 +1757,8 @@ def detect_gpu() -> Dict[str, Any]:
 
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     """RunPod serverless handler"""
+    global SETUP_COMPLETE
+
     start_time = time.time()
     job_input = event.get("input", {})
     log_job_summary(job_input)
@@ -1760,7 +1777,13 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             return {"status": "success", "action": "sync_models", "gpu": gpu}
 
         if action == "reinstall_comfyui":
-            install_comfyui(force_reinstall=True)
+            SETUP_COMPLETE = False
+            if not install_comfyui(force_reinstall=True):
+                return {"status": "error", "error": "ComfyUI reinstall failed", "gpu": gpu}
+            ensure_custom_nodes()
+            ensure_comfy_model_links()
+            if SETUP_ONCE:
+                SETUP_COMPLETE = True
             return {"status": "success", "action": "reinstall_comfyui", "gpu": gpu}
 
         if action == "status":
