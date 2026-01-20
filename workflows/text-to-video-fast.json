@@ -103,6 +103,7 @@
       "inputs": {
         "video": ["12", 0],
         "filename_prefix": "ltxv_fast",
+        "format": "auto",
         "codec": "auto",
         "quality": "auto"
       }

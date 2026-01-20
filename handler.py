@@ -1504,6 +1504,10 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
             if vae_ref is None and inputs.get("vae"):
                 vae_ref = inputs.get("vae")
 
+        if class_type == "LTXVImgToVideo":
+            if image_strength is not None:
+                inputs["strength"] = float(image_strength)
+
         if class_type == "LTXVSampler":
             if steps is not None:
                 inputs["steps"] = int(steps)
@@ -1523,6 +1527,10 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
 
         if class_type == "EmptyLTXVLatentVideo":
             empty_latent_node_id = str(node_id)
+
+        if class_type == "SaveVideo":
+            inputs.setdefault("format", "auto")
+            inputs.setdefault("codec", "auto")
 
         if class_type == "LTXVLatentUpsampler":
             upscaled_latent_node_id = str(node_id)

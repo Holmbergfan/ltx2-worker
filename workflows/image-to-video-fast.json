@@ -47,7 +47,7 @@
         "height": 512,
         "length": 97,
         "batch_size": 1,
-        "image_noise_strength": 0.15
+        "strength": 0.85
       }
     },
     "7": {
@@ -114,6 +114,7 @@
       "inputs": {
         "video": ["13", 0],
         "filename_prefix": "ltxv_fast",
+        "format": "auto",
         "codec": "auto",
         "quality": "auto"
       }
