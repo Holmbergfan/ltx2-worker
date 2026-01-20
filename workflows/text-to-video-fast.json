@@ -1,0 +1,111 @@
+{
+  "name": "LTX-Video_T2V_Fast",
+  "description": "Fast video-only text-to-video using LTX-Video 2B (no audio)",
+  "version": 1.0,
+  "workflow": {
+    "1": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {
+        "ckpt_name": "ltx-video-2b-v0.9.5.safetensors"
+      }
+    },
+    "2": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "t5xxl_fp16.safetensors",
+        "type": "ltxv"
+      }
+    },
+    "3": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "A cinematic video with smooth motion and high quality details.",
+        "clip": ["2", 0]
+      }
+    },
+    "4": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "low quality, worst quality, deformed, distorted, disfigured, motion smear, motion artifacts, fused fingers, bad anatomy, weird hand, ugly",
+        "clip": ["2", 0]
+      }
+    },
+    "5": {
+      "class_type": "EmptyLTXVLatentVideo",
+      "inputs": {
+        "width": 768,
+        "height": 512,
+        "length": 97,
+        "batch_size": 1
+      }
+    },
+    "6": {
+      "class_type": "LTXVConditioning",
+      "inputs": {
+        "positive": ["3", 0],
+        "negative": ["4", 0],
+        "frame_rate": 24
+      }
+    },
+    "7": {
+      "class_type": "LTXVScheduler",
+      "inputs": {
+        "steps": 30,
+        "max_shift": 2.05,
+        "base_shift": 0.95,
+        "stretch": true,
+        "terminal": 0.1,
+        "latent": ["5", 0]
+      }
+    },
+    "8": {
+      "class_type": "KSamplerSelect",
+      "inputs": {
+        "sampler_name": "euler"
+      }
+    },
+    "9": {
+      "class_type": "RandomNoise",
+      "inputs": {
+        "noise_seed": 0
+      }
+    },
+    "10": {
+      "class_type": "SamplerCustom",
+      "inputs": {
+        "model": ["1", 0],
+        "positive": ["6", 0],
+        "negative": ["6", 1],
+        "sampler": ["8", 0],
+        "sigmas": ["7", 0],
+        "latent_image": ["5", 0],
+        "add_noise": true,
+        "noise_seed": 0,
+        "cfg": 3.0
+      }
+    },
+    "11": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": ["10", 0],
+        "vae": ["1", 2]
+      }
+    },
+    "12": {
+      "class_type": "CreateVideo",
+      "inputs": {
+        "images": ["11", 0],
+        "frame_rate": 24
+      }
+    },
+    "13": {
+      "class_type": "SaveVideo",
+      "inputs": {
+        "video": ["12", 0],
+        "filename_prefix": "ltxv_fast",
+        "codec": "auto",
+        "quality": "auto"
+      }
+    }
+  }
+}

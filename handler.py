@@ -424,11 +424,15 @@ HF_TOKEN = (
     or ""
 )
 
-# LTX-2 (19B) Model - The newest and best model
+# LTX-2 (19B) Model - The newest and best model (with audio)
 # Options: ltx-2-19b-distilled-fp8.safetensors (smaller), ltx-2-19b-dev-fp8.safetensors (larger)
 LTX2_MODEL_REPO = os.environ.get("LTX2_MODEL_REPO", "Lightricks/LTX-2")
 LTX2_MODEL_FILENAME = os.environ.get("LTX2_MODEL_FILENAME", "ltx-2-19b-distilled-fp8.safetensors")
 LTX2_FULL_MODEL_FILENAME = os.environ.get("LTX2_FULL_MODEL_FILENAME", "ltx-2-19b-dev-fp8.safetensors")
+
+# LTX-Video (2B) Model - Older, faster, video-only model
+LTXV_MODEL_REPO = os.environ.get("LTXV_MODEL_REPO", "Lightricks/LTX-Video")
+LTXV_MODEL_FILENAME = os.environ.get("LTXV_MODEL_FILENAME", "ltx-video-2b-v0.9.5.safetensors")
 GEMMA_REPO = os.environ.get("GEMMA_REPO", "google/gemma-3-12b-it-qat-q4_0-unquantized")
 GEMMA_DIRNAME = os.environ.get("GEMMA_DIRNAME", "gemma-3-12b-it-qat-q4_0-unquantized")
 PRELOAD_MODELS = os.environ.get("PRELOAD_MODELS", "true").lower() in ("1", "true", "yes")
@@ -955,6 +959,11 @@ def ensure_required_models(workflow: Dict[str, Any]):
             if ltxv_path:
                 required["checkpoints"].add(ltxv_path)
 
+        if class_type == "CLIPLoader":
+            clip_name = inputs.get("clip_name")
+            if clip_name:
+                required["text_encoders"].add(clip_name)
+
         if class_type in {"LoraLoaderModelOnly", "LTXVQ8LoraModelLoader"}:
             lora_name = inputs.get("lora_name")
             if lora_name:
@@ -966,8 +975,17 @@ def ensure_required_models(workflow: Dict[str, Any]):
                 required["latent_upscale_models"].add(model_name)
 
     for ckpt_name in sorted(required["checkpoints"]):
+        ckpt_path = Path(f"{MODEL_DIR}/checkpoints") / ckpt_name
+        if ckpt_path.exists():
+            continue
         if ckpt_name.startswith("ltx-2-"):
+            # LTX-2 (19B) model from Lightricks/LTX-2
             if download_hf_file(LTX2_MODEL_REPO, ckpt_name, f"{MODEL_DIR}/checkpoints", HF_TOKEN):
+                downloaded_any = True
+        elif ckpt_name.startswith("ltx-video-"):
+            # LTX-Video (2B) model from Lightricks/LTX-Video
+            log(f"Downloading LTX-Video 2B model: {ckpt_name}...", level="INFO")
+            if download_hf_file(LTXV_MODEL_REPO, ckpt_name, f"{MODEL_DIR}/checkpoints", HF_TOKEN):
                 downloaded_any = True
         else:
             log(f"Checkpoint not found locally and repo unknown: {ckpt_name}", level="WARN")
@@ -1018,8 +1036,16 @@ def ensure_required_models(workflow: Dict[str, Any]):
             log(f"Upscaler not found locally and repo unknown: {model_name}", level="WARN")
 
     for encoder_path in sorted(required["text_encoders"]):
+        encoder_file = Path(f"{MODEL_DIR}/text_encoders") / encoder_path
+        if encoder_file.exists():
+            continue
         if encoder_path.startswith(f"{GEMMA_DIRNAME}/") or encoder_path == GEMMA_DIRNAME:
             if download_gemma_text_encoder(HF_TOKEN):
+                downloaded_any = True
+        elif encoder_path == "t5xxl_fp16.safetensors":
+            # T5 text encoder for LTX-Video
+            log(f"Downloading T5 text encoder: {encoder_path}...", level="INFO")
+            if download_hf_file("comfyanonymous/flux_text_encoders", encoder_path, f"{MODEL_DIR}/text_encoders", HF_TOKEN):
                 downloaded_any = True
         else:
             log(f"Text encoder not found locally and repo unknown: {encoder_path}", level="WARN")
