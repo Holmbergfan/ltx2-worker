@@ -406,6 +406,54 @@ def log_workflow_summary(summary: Dict[str, Any]) -> None:
         parts.append("updated_inputs=yes")
 
     log("Workflow " + " | ".join(parts), level="INFO")
+
+
+def log_model_selection(workflow: Dict[str, Any], job_input: Dict[str, Any], workflow_label: str) -> None:
+    checkpoints = set()
+    loras = set()
+    has_upscaler = False
+    has_audio = False
+
+    for node in workflow.values():
+        inputs = node.get("inputs", {})
+        class_type = node.get("class_type")
+        if class_type in {"CheckpointLoaderSimple", "LTXVAudioVAELoader"}:
+            ckpt_name = inputs.get("ckpt_name")
+            if ckpt_name:
+                checkpoints.add(ckpt_name)
+        if class_type == "LTXVGemmaCLIPModelLoader":
+            ckpt_name = inputs.get("ltxv_path")
+            if ckpt_name:
+                checkpoints.add(ckpt_name)
+        if class_type == "LoraLoaderModelOnly":
+            lora_name = inputs.get("lora_name")
+            if lora_name:
+                loras.add(lora_name)
+        if class_type == "LTXVLatentUpsampler":
+            has_upscaler = True
+        if class_type in {"LTXVConcatAVLatent", "LTXVAudioGenerate", "LTXVAudioVAELoader"}:
+            has_audio = True
+
+    selection = {
+        "workflow": workflow_label,
+        "requested_model": job_input.get("model"),
+        "checkpoint": sorted(checkpoints),
+        "lora": sorted(loras),
+        "pipeline": "two_stage" if has_upscaler else "one_stage",
+        "audio": has_audio,
+    }
+    ckpt_label = ",".join(selection["checkpoint"]) if selection["checkpoint"] else "unknown"
+    lora_label = ",".join(selection["lora"]) if selection["lora"] else "none"
+    log(
+        "Model selection "
+        f"model={selection['requested_model']} "
+        f"checkpoint={ckpt_label} "
+        f"lora={lora_label} "
+        f"pipeline={selection['pipeline']} "
+        f"audio={selection['audio']}",
+        level="INFO",
+    )
+    _log_ltx2_event("model_selection", selection, level="DEBUG")
 log(
     f"Storage root={DEFAULT_ROOT} | MODEL_DIR={MODEL_DIR} | COMFY_HOME={COMFY_HOME} | TMPDIR={TMPDIR} | AUTO_SEED={AUTO_SEED}",
     level="INFO"
@@ -1410,8 +1458,22 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         normalized = str(model_choice).strip().lower()
         is_lightning = normalized in ("lightning", "ltx-video-2b", "ltxv", "2b")
         if not is_lightning:
-            use_full = normalized in ("full", "dev", "19b", "full-fp8", "ltx-2-19b-dev")
-            selected_ckpt = LTX2_FULL_MODEL_FILENAME if use_full else LTX2_MODEL_FILENAME
+            if normalized in ("distilled-fp8", "distilled_fp8", "distilled-fp8-19b"):
+                selected_ckpt = "ltx-2-19b-distilled-fp8.safetensors"
+                use_full = False
+            elif normalized in ("distilled", "distilled-fp16", "distilled-19b"):
+                selected_ckpt = "ltx-2-19b-distilled.safetensors"
+                use_full = False
+            elif normalized in ("dev-fp8", "full-fp8", "ltx-2-19b-dev-fp8"):
+                selected_ckpt = "ltx-2-19b-dev-fp8.safetensors"
+                use_full = True
+            elif normalized in ("dev", "full", "ltx-2-19b-dev"):
+                selected_ckpt = "ltx-2-19b-dev.safetensors"
+                use_full = True
+            else:
+                use_full = normalized in ("full", "dev", "19b", "full-fp8", "ltx-2-19b-dev")
+                selected_ckpt = LTX2_FULL_MODEL_FILENAME if use_full else LTX2_MODEL_FILENAME
+
             lora_strength = 0.0 if use_full else 1.0
             lora_name = "ltx-2-19b-distilled-lora-384.safetensors"
             gemma_default = f"{GEMMA_DIRNAME}/model-00001-of-00005.safetensors"
@@ -1976,6 +2038,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 summary["seed_source"] = "client"
             log_workflow_summary(summary)
             _log_ltx2_event("workflow_summary", summary, level="DEBUG")
+            log_model_selection(workflow, job_input, workflow_label)
 
             # Ensure required models exist before sending to ComfyUI
             ensure_required_models(workflow)
