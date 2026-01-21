@@ -44,6 +44,10 @@ LOG_LEVEL_NUM = LOG_LEVELS.get(LOG_LEVEL, 20)
 LOG_VERBOSE = LOG_LEVEL_NUM <= LOG_LEVELS["DEBUG"]
 STATUS_LOG_INTERVAL = int(os.environ.get("LTX2_STATUS_LOG_INTERVAL", "60"))
 LOG_TIMESTAMPS = os.environ.get("LTX2_LOG_TIMESTAMPS", "true").lower() in ("1", "true", "yes")
+PROGRESS_LOG_MARKERS = os.environ.get(
+    "LTX2_PROGRESS_LOG_MARKERS",
+    "0,60,120,300,600,900,1200"
+)
 
 if not LOG_VERBOSE:
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
@@ -1880,6 +1884,19 @@ def wait_for_prompt(prompt_id: str, timeout_seconds: int = 1800) -> Dict[str, An
     start = time.time()
     last_log = 0.0
     last_queue = None
+    markers = []
+    for raw in PROGRESS_LOG_MARKERS.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            markers.append(int(raw))
+        except ValueError:
+            continue
+    markers = sorted(set(markers)) if markers else [0, 60, 120, 300, 600, 900, 1200]
+    marker_idx = 0
+    last_periodic = 0.0
+
     while time.time() - start < timeout_seconds:
         resp = requests.get(f"{COMFY_URL}/history/{prompt_id}", timeout=10)
         if resp.status_code == 200:
@@ -1892,14 +1909,21 @@ def wait_for_prompt(prompt_id: str, timeout_seconds: int = 1800) -> Dict[str, An
         now = time.time()
         if now - last_log >= STATUS_LOG_INTERVAL:
             elapsed = int(now - start)
-            log(f"ComfyUI running... prompt={prompt_id} elapsed={elapsed}s", level="INFO")
+            if marker_idx < len(markers) and elapsed >= markers[marker_idx]:
+                log(f"ComfyUI running... prompt={prompt_id} elapsed={elapsed}s", level="INFO")
+                marker_idx += 1
+                last_periodic = elapsed
+            elif marker_idx >= len(markers) and elapsed - last_periodic >= max(STATUS_LOG_INTERVAL * 5, 300):
+                log(f"ComfyUI running... prompt={prompt_id} elapsed={elapsed}s", level="INFO")
+                last_periodic = elapsed
+
             queue = get_queue_snapshot()
             if queue:
                 running = len(queue.get("queue_running", []))
                 pending = len(queue.get("queue_pending", []))
                 snapshot = (running, pending)
                 if snapshot != last_queue:
-                    log(f"ComfyUI queue: running={running} pending={pending}", level="DEBUG")
+                    log(f"ComfyUI queue: running={running} pending={pending}", level="INFO")
                     last_queue = snapshot
             last_log = now
         time.sleep(2)
