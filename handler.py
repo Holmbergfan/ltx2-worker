@@ -328,6 +328,7 @@ def summarize_job_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
         "cfg": job_input.get("cfg_scale"),
         "seed": job_input.get("seed"),
         "image_strength": job_input.get("image_strength"),
+        "with_audio": _coerce_bool(job_input.get("with_audio")),
         "prompt_len": len(prompt) if prompt else 0,
         "negative_len": len(negative_prompt) if negative_prompt else 0,
         "input_image": input_label,
@@ -353,6 +354,8 @@ def log_job_summary(job_input: Dict[str, Any]) -> None:
         parts.append(f"cfg={summary['cfg']}")
     if summary.get("image_strength") is not None:
         parts.append(f"image_strength={summary['image_strength']}")
+    if summary.get("with_audio") is not None:
+        parts.append(f"audio={'on' if summary['with_audio'] else 'off'}")
     if summary.get("seed") is not None:
         parts.append(f"seed={summary['seed']}")
     if summary.get("input_image"):
@@ -413,6 +416,7 @@ def log_model_selection(workflow: Dict[str, Any], job_input: Dict[str, Any], wor
     loras = set()
     has_upscaler = False
     has_audio = False
+    explicit_audio = _coerce_bool(job_input.get("with_audio"))
 
     for node in workflow.values():
         inputs = node.get("inputs", {})
@@ -440,7 +444,7 @@ def log_model_selection(workflow: Dict[str, Any], job_input: Dict[str, Any], wor
         "checkpoint": sorted(checkpoints),
         "lora": sorted(loras),
         "pipeline": "two_stage" if has_upscaler else "one_stage",
-        "audio": has_audio,
+        "audio": explicit_audio if explicit_audio is not None else has_audio,
     }
     ckpt_label = ",".join(selection["checkpoint"]) if selection["checkpoint"] else "unknown"
     lora_label = ",".join(selection["lora"]) if selection["lora"] else "none"
@@ -1343,7 +1347,53 @@ def _coerce_keyframes(value: Any) -> List[int]:
 
 def _normalize_keyframes(count: int, keyframes: List[int], num_frames: Optional[int]) -> List[int]:
     if count <= 0:
-        return []
+    return []
+
+
+def _coerce_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("1", "true", "yes", "y", "on"):
+            return True
+        if normalized in ("0", "false", "no", "n", "off"):
+            return False
+    return None
+
+
+def _normalize_model_name(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def select_model_for_vram(requested: Any, vram_gb: float) -> str:
+    normalized = _normalize_model_name(requested)
+    if not normalized:
+        return ""
+    if normalized in ("lightning", "ltx-video-2b", "ltxv", "2b"):
+        return "lightning"
+    if vram_gb <= 0:
+        return normalized
+    if vram_gb < 24:
+        return "lightning"
+    if vram_gb < 32:
+        if normalized in ("dev", "full", "dev-fp8", "full-fp8", "ltx-2-19b-dev", "ltx-2-19b-dev-fp8"):
+            return "distilled-fp8"
+        if normalized in ("distilled", "distilled-fp16", "distilled-fp8", "distilled_fp8", "ltx-2-19b-distilled", "ltx-2-19b-distilled-fp8"):
+            return "distilled-fp8"
+        return "distilled-fp8"
+    if vram_gb < 48:
+        if normalized in ("dev", "full", "ltx-2-19b-dev"):
+            return "dev-fp8"
+        if normalized in ("distilled", "distilled-fp16", "ltx-2-19b-distilled"):
+            return "distilled-fp8"
+    return normalized
     if keyframes and len(keyframes) == count:
         if num_frames:
             min_idx = -(num_frames - 1)
@@ -1420,6 +1470,7 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         job_input.get("input_keyframes")
         or job_input.get("input_keyframe_indices")
     )
+    with_audio = _coerce_bool(job_input.get("with_audio"))
     if not input_images and input_image:
         input_images = [input_image]
     if input_images:
@@ -1564,10 +1615,13 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         if class_type == "CFGGuider" and cfg is not None:
             inputs["cfg"] = float(cfg)
 
-        if class_type == "CreateVideo" and apply_fps:
-            inputs["fps"] = float(fps)
-            if "frame_rate" in inputs:
-                inputs["frame_rate"] = float(fps)
+        if class_type == "CreateVideo":
+            if apply_fps:
+                inputs["fps"] = float(fps)
+                if "frame_rate" in inputs:
+                    inputs["frame_rate"] = float(fps)
+            if with_audio is False:
+                inputs.pop("audio", None)
 
         if class_type == "LoadImage":
             has_load_image = True
@@ -1927,7 +1981,6 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
 
     start_time = time.time()
     job_input = event.get("input", {})
-    log_job_summary(job_input)
     _log_ltx2_event("job_input", job_input, level="DEBUG")
 
     try:
@@ -1937,6 +1990,18 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         setup_environment(preload_models=PRELOAD_MODELS and action != "sync_models")
         gpu = detect_gpu()
         log(f"GPU: {gpu['gpu_name']} ({gpu['vram_gb']}GB)", level="INFO")
+
+        if action == "generate":
+            requested_model = job_input.get("model")
+            selected_model = select_model_for_vram(requested_model, gpu.get("vram_gb", 0) or 0)
+            if selected_model and selected_model != _normalize_model_name(requested_model):
+                log(
+                    f"Model override: requested={requested_model} selected={selected_model} vram={gpu.get('vram_gb', 0)}GB",
+                    level="WARN",
+                )
+                job_input["model"] = selected_model
+
+        log_job_summary(job_input)
 
         if action == "sync_models":
             download_models(force=job_input.get("force", False))
