@@ -1496,10 +1496,9 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
             inputs["cfg"] = float(cfg)
 
         if class_type == "CreateVideo" and apply_fps:
-            if "frame_rate" in inputs and "fps" not in inputs:
+            inputs["fps"] = float(fps)
+            if "frame_rate" in inputs:
                 inputs["frame_rate"] = float(fps)
-            else:
-                inputs["fps"] = float(fps)
 
         if class_type == "LoadImage":
             has_load_image = True
