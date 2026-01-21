@@ -1388,7 +1388,8 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
     upscaled_latent_node_id: Optional[str] = None
     vae_ref = None
     noise_offset = 0
-    use_keyframes = bool(input_keyframes) or len(input_images) > 1
+    use_keyframes = len(input_images) > 1
+    downloaded_input_image = None
 
     if isinstance(prompt, str):
         prompt = prompt.strip()
@@ -1495,7 +1496,9 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         if class_type == "LoadImage":
             has_load_image = True
             if input_image and not use_keyframes:
-                inputs["image"] = download_input_image(input_image)
+                if downloaded_input_image is None:
+                    downloaded_input_image = download_input_image(input_image)
+                inputs["image"] = downloaded_input_image
 
         if class_type == "LTXVImgToVideoInplace":
             if image_strength is not None:
@@ -1567,6 +1570,20 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
                     negative_clip_id = str(next_id)
                     next_id += 1
                 inputs["negative"] = [negative_clip_id, 0]
+
+    if use_keyframes and input_images:
+        if not load_image_nodes or not conditioning_node_ids or not empty_latent_node_id or not vae_ref:
+            print("[LTX2] WARN: Workflow missing keyframe nodes; falling back to first image only.")
+            use_keyframes = False
+            input_images = input_images[:1]
+            input_keyframes = []
+            if input_images:
+                input_image = input_images[0]
+
+    if not use_keyframes and input_image and load_image_nodes:
+        if downloaded_input_image is None:
+            downloaded_input_image = download_input_image(input_image)
+        workflow[load_image_nodes[0]]["inputs"]["image"] = downloaded_input_image
 
     if use_keyframes and input_images:
         if not load_image_nodes:
