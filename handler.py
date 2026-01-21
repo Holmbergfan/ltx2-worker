@@ -1402,13 +1402,19 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
     if seed is None and AUTO_SEED:
         seed = random.randint(0, 2**31 - 1)
 
+    selected_ckpt = None
+    lora_strength = None
+    lora_name = None
+    gemma_default = None
     if model_choice:
         normalized = str(model_choice).strip().lower()
-        use_full = normalized in ("full", "dev", "19b", "full-fp8", "ltx-2-19b-dev")
-        selected_ckpt = LTX2_FULL_MODEL_FILENAME if use_full else LTX2_MODEL_FILENAME
-        lora_strength = 0.0 if use_full else 1.0
-        lora_name = "ltx-2-19b-distilled-lora-384.safetensors"
-        gemma_default = f"{GEMMA_DIRNAME}/model-00001-of-00005.safetensors"
+        is_lightning = normalized in ("lightning", "ltx-video-2b", "ltxv", "2b")
+        if not is_lightning:
+            use_full = normalized in ("full", "dev", "19b", "full-fp8", "ltx-2-19b-dev")
+            selected_ckpt = LTX2_FULL_MODEL_FILENAME if use_full else LTX2_MODEL_FILENAME
+            lora_strength = 0.0 if use_full else 1.0
+            lora_name = "ltx-2-19b-distilled-lora-384.safetensors"
+            gemma_default = f"{GEMMA_DIRNAME}/model-00001-of-00005.safetensors"
 
     if (input_image or input_images) and (width is None or height is None):
         fallback_width, fallback_height = (1024, 576) if use_full else (768, 512)
@@ -1435,17 +1441,18 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         if class_type == "LoadImage":
             load_image_nodes.append(str(node_id))
 
-        if class_type == "CheckpointLoaderSimple" and model_choice:
+        if class_type == "CheckpointLoaderSimple" and selected_ckpt:
             inputs["ckpt_name"] = selected_ckpt
 
-        if class_type == "LTXVAudioVAELoader" and model_choice:
+        if class_type == "LTXVAudioVAELoader" and selected_ckpt:
             inputs["ckpt_name"] = selected_ckpt
 
-        if class_type == "LTXVGemmaCLIPModelLoader" and model_choice:
+        if class_type == "LTXVGemmaCLIPModelLoader" and selected_ckpt:
             inputs["ltxv_path"] = selected_ckpt
-            inputs.setdefault("gemma_path", gemma_default)
+            if gemma_default:
+                inputs.setdefault("gemma_path", gemma_default)
 
-        if class_type == "LoraLoaderModelOnly" and model_choice:
+        if class_type == "LoraLoaderModelOnly" and lora_name:
             inputs["lora_name"] = lora_name
             inputs["strength_model"] = float(lora_strength)
 
