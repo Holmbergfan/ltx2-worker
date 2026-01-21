@@ -1347,7 +1347,25 @@ def _coerce_keyframes(value: Any) -> List[int]:
 
 def _normalize_keyframes(count: int, keyframes: List[int], num_frames: Optional[int]) -> List[int]:
     if count <= 0:
-    return []
+        return []
+    if keyframes and len(keyframes) == count:
+        if num_frames:
+            min_idx = -(num_frames - 1)
+            max_idx = num_frames - 1
+            return [max(min(idx, max_idx), min_idx) for idx in keyframes]
+        return keyframes
+
+    if not num_frames:
+        return list(range(count))
+
+    if count == 1:
+        return [0]
+
+    max_idx = num_frames - 1
+    return [
+        min(max(round(i * max_idx / (count - 1)), 0), max_idx)
+        for i in range(count)
+    ]
 
 
 def _coerce_bool(value: Any) -> Optional[bool]:
