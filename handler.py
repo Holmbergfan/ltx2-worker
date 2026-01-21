@@ -19,6 +19,7 @@ import subprocess
 import traceback
 import json
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -42,6 +43,7 @@ LOG_LEVELS = {
 LOG_LEVEL_NUM = LOG_LEVELS.get(LOG_LEVEL, 20)
 LOG_VERBOSE = LOG_LEVEL_NUM <= LOG_LEVELS["DEBUG"]
 STATUS_LOG_INTERVAL = int(os.environ.get("LTX2_STATUS_LOG_INTERVAL", "60"))
+LOG_TIMESTAMPS = os.environ.get("LTX2_LOG_TIMESTAMPS", "true").lower() in ("1", "true", "yes")
 
 if not LOG_VERBOSE:
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
@@ -50,7 +52,12 @@ if not LOG_VERBOSE:
 def log(message: str, level: str = "INFO") -> None:
     level_upper = level.upper()
     if LOG_LEVELS.get(level_upper, 20) >= LOG_LEVEL_NUM:
-        print(f"[LTX2] {level_upper}: {message}")
+        prefix = f"[LTX2] {level_upper}: {message}"
+        if LOG_TIMESTAMPS:
+            ts = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+            print(f"{ts} {prefix}")
+        else:
+            print(prefix)
 
 # =============================================================================
 # Configuration
