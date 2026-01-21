@@ -1474,8 +1474,13 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
             if height is not None:
                 inputs["height"] = int(height)
 
-        if class_type == "EmptyLTXVLatentVideo" and num_frames is not None:
-            inputs["length"] = int(num_frames)
+        if class_type == "EmptyLTXVLatentVideo":
+            if width is not None:
+                inputs["width"] = int(width)
+            if height is not None:
+                inputs["height"] = int(height)
+            if num_frames is not None:
+                inputs["length"] = int(num_frames)
 
         if class_type == "LTXVEmptyLatentAudio":
             if num_frames is not None:
@@ -1491,7 +1496,10 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
             inputs["cfg"] = float(cfg)
 
         if class_type == "CreateVideo" and apply_fps:
-            inputs["fps"] = float(fps)
+            if "frame_rate" in inputs and "fps" not in inputs:
+                inputs["frame_rate"] = float(fps)
+            else:
+                inputs["fps"] = float(fps)
 
         if class_type == "LoadImage":
             has_load_image = True
@@ -1510,6 +1518,12 @@ def update_workflow_inputs(workflow: Dict[str, Any], job_input: Dict[str, Any]) 
         if class_type == "LTXVImgToVideo":
             if image_strength is not None:
                 inputs["strength"] = float(image_strength)
+            if width is not None:
+                inputs["width"] = int(width)
+            if height is not None:
+                inputs["height"] = int(height)
+            if num_frames is not None:
+                inputs["length"] = int(num_frames)
 
         if class_type == "LTXVSampler":
             if steps is not None:
